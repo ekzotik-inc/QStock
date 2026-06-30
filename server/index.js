@@ -8,6 +8,7 @@ const { Server } = require('socket.io');
 const { login, logout, authRequired, publicUser, verifyToken } = require('./auth');
 const rt = require('./realtime');
 const scheduler = require('./scheduler');
+const { seedIfEmpty } = require('./bootstrap');
 
 const usersRoutes = require('./routes/users');
 const skusRoutes = require('./routes/skus');
@@ -61,6 +62,7 @@ io.on('connection', (socket) => {
 });
 
 rt.init(io);
+seedIfEmpty();   // create demo admin on a fresh database (e.g. first cloud deploy)
 scheduler.start();
 
 const PORT = process.env.PORT || 3000;
