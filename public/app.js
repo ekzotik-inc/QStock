@@ -36,8 +36,8 @@ function toast(msg, kind = '') {
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 4000);
 }
 
-function modal(html, onMount) {
-  const bg = el(`<div class="modal-bg"><div class="modal">${html}</div></div>`);
+function modal(html, onMount, cls = '') {
+  const bg = el(`<div class="modal-bg"><div class="modal ${cls}">${html}</div></div>`);
   bg.addEventListener('click', (e) => { if (e.target === bg) bg.remove(); });
   document.body.appendChild(bg);
   if (onMount) onMount(bg);
@@ -944,22 +944,21 @@ function showDayReport(d) {
     <div class="kpis" style="margin-bottom:16px">
       ${kpi('Продано (шт)', num(t.sales_qty))}
       ${kpi('Сумма продаж', money(t.sales_value), true)}
-      ${kpi('Остаток вечером', num(t.current))}
       ${kpi('Стоимость остатка', money(t.stock_value), true)}
     </div>
     <div class="card" style="padding:0;overflow:auto;box-shadow:none;border:1px solid var(--line)">
       <table class="shift-table"><thead><tr>
-        <th>SKU</th><th class="num">Утром</th><th class="num">Продано</th><th class="num">Вечером</th><th class="num">Сумма</th>
+        <th>SKU</th><th class="num">Утром</th><th class="num">Продано</th><th class="num">Сумма продаж</th>
       </tr></thead>
       <tbody>${(sold.length ? sold : d.lines).map((l) => `<tr>
         <td>${esc(l.name)}</td><td class="num">${num(l.opening)}</td><td class="num"><b>${num(l.sales_qty)}</b></td>
-        <td class="num">${num(l.current)}</td><td class="num">${money(l.sales_value)}</td></tr>`).join('')}</tbody>
+        <td class="num">${money(l.sales_value)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td>Итого</td><td class="num">${num(t.opening)}</td><td class="num">${num(t.sales_qty)}</td>
-        <td class="num">${num(t.current)}</td><td class="num">${money(t.sales_value)}</td></tr></tfoot>
+        <td class="num">${money(t.sales_value)}</td></tr></tfoot>
       </table>
     </div>
     <div class="foot"><button class="btn" id="okReport">Готово</button></div>`,
-    (bg) => { $('#okReport', bg).onclick = () => { closeModal(); renderShell(); }; });
+    (bg) => { $('#okReport', bg).onclick = () => { closeModal(); renderShell(); }; }, 'wide');
 }
 
 async function doInventory(d) {
