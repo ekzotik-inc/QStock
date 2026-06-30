@@ -20,11 +20,11 @@ ensureUser('Петров С.Э.', 'se', 'se123', 'SE');
 ensureUser('Сидоров С.Э.', 'se2', 'se123', 'SE');
 
 const skus = [
-  ['IQOS ILUMA PRIME', 'IL-PRIME', 'Устройства', 12990, 3],
-  ['IQOS ILUMA ONE', 'IL-ONE', 'Устройства', 4990, 5],
-  ['TEREA Sienna', 'TEREA-SIE', 'Стики', 250, 20],
-  ['TEREA Amber', 'TEREA-AMB', 'Стики', 250, 20],
-  ['TEREA Turquoise', 'TEREA-TUR', 'Стики', 250, 20],
+  ['IQOS ILUMA PRIME', 'IL-PRIME', 'Устройства', 1690000, 3],
+  ['IQOS ILUMA ONE', 'IL-ONE', 'Устройства', 690000, 5],
+  ['TEREA Sienna', 'TEREA-SIE', 'Стики', 32000, 20],
+  ['TEREA Amber', 'TEREA-AMB', 'Стики', 32000, 20],
+  ['TEREA Turquoise', 'TEREA-TUR', 'Стики', 32000, 20],
 ];
 for (const [name, article, category, price, min] of skus) {
   if (!db.prepare('SELECT 1 FROM skus WHERE article=?').get(article)) {
@@ -38,7 +38,7 @@ for (const [name, article, category, price, min] of skus) {
 if (!db.prepare('SELECT 1 FROM points LIMIT 1').get()) {
   db.prepare(`INSERT INTO points (name, address, bre_id, max_se, sale_mode, shift_end_time)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('ТТ Центральная', 'г. Москва, ул. Тверская, 1', bre.id, 2, 'per_sale', '22:00');
+    .run('ТТ Центральная', 'г. Ташкент, пр. Амира Темура, 1', bre.id, 2, 'per_sale', '22:00');
   console.log('+ point ТТ Центральная');
 }
 
