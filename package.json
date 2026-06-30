@@ -11,7 +11,7 @@
   },
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.16.0"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
