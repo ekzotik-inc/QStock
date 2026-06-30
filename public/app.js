@@ -882,8 +882,10 @@ async function viewShift(v) {
 
 function stockRow(l, canEdit) {
   const low = l.min_stock > 0 && l.current <= l.min_stock;
+  // SE doesn't need the article; admins/BRE still see it
+  const sub = App.user.role === 'SE' ? money(l.price) : `${esc(l.article)} · ${money(l.price)}`;
   return `<tr class="${low ? 'row-low' : ''}" data-sku="${l.sku_id}">
-    <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
+    <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${sub}</div></td>
     <td class="num">${num(l.opening)}</td>
     <td class="num">${num(l.income)}</td>
     <td class="num"><b>${num(l.sales_qty)}</b></td>
