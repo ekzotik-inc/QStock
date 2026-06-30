@@ -227,6 +227,7 @@ td { color: var(--ink-2); }
 .qty-input { width: 64px; padding: 9px; border: 1px solid var(--line-strong); border-radius: 10px; text-align: center;
   background: var(--surface); color: var(--ink); outline: none; }
 .qty-input:focus { border-color: var(--accent); box-shadow: var(--ring); }
+input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55; }
 
 /* ---------- SE cabinet ---------- */
 .shift-head { display: flex; align-items: center; justify-content: space-between; gap: 22px; flex-wrap: wrap; }

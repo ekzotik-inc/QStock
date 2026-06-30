@@ -58,6 +58,9 @@ async function loginAs(page, login, password) {
 
     const boardVisible = await page.isVisible('.se-shift tbody tr');
     check('UI-SE-SHIFT-BOARD', boardVisible, 'SE shift table renders');
+    // "0" shown as a placeholder hint (empty value) in продано
+    const ghost = await page.$eval('.sold-input', (e) => e.value === '' && e.placeholder === '0').catch(() => false);
+    check('UI-SE-SOLD-GHOST', ghost, 'продано shows 0 as a placeholder hint');
 
     // grouped table with the requested columns + category rows
     const headers = (await page.$$eval('.se-shift thead th', (e) => e.map((x) => x.innerText))).join('|');
@@ -132,6 +135,10 @@ async function loginAs(page, login, password) {
         check('UI-SE-NOTE-CREATE', await page.isVisible('.note-card'), 'note card appears');
         await page.click('.note-card [data-pin]'); await page.waitForTimeout(600);
         check('UI-SE-NOTE-PIN', await page.isVisible('.note-card.pinned'), 'note can be pinned');
+        // Enter submits a note (Shift+Enter would be newline)
+        const beforeN = (await page.$$('.note-card')).length;
+        await page.fill('#noteText', 'Заметка по Enter'); await page.press('#noteText', 'Enter'); await page.waitForTimeout(600);
+        check('UI-SE-NOTE-ENTER', (await page.$$('.note-card')).length > beforeN, 'Enter creates the note');
       }
     }
 

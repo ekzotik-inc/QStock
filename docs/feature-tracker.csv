@@ -102,3 +102,7 @@ SE-19,SE Cabinet,SE,Списание/возврат tab sends approval request t
 REQ-01,Requests,BRE/ADMIN,BRE approves/rejects stock requests for own points,POST /requests/:id/approve|reject; applies adjust to open shift,Verified,PASS,
 REQ-02,Requests,SE,Approved writeoff/return shows yellow +/- chip near SKU,shift_stock.adjust; adj-chip on Моя смена,Verified,PASS,
 SE-20,SE Cabinet,SE,Notes tab — shared notes per point with status/importance/pin,GET/POST/PUT/DELETE /notes; realtime notes:changed,Verified,PASS,Статусы открыто/в ожидании/закрыто; важность; закрепление 📎
+UX-07,UX,All,Laptop keyboard nav — Enter moves to next field in tables/modals,wireEnterNav on продано/приход/opening/inventory/logistics/filters,Verified,PASS,
+UX-08,UX,SE,Продано shows 0 as a placeholder hint (empty value),placeholder=0 ghost; stepper keeps empty at 0,Verified,PASS,
+UX-09,UX,SE,Notes: Enter sends, Shift+Enter newline,composer keydown,Verified,PASS,
+UX-10,UX,All,Modals submit primary action on Enter,modal Enter handler clicks primary button,Verified,PASS,

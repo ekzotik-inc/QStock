@@ -39,11 +39,30 @@ function toast(msg, kind = '') {
 function modal(html, onMount, cls = '') {
   const bg = el(`<div class="modal-bg"><div class="modal ${cls}">${html}</div></div>`);
   bg.addEventListener('click', (e) => { if (e.target === bg) bg.remove(); });
+  // Enter in a single-line input submits the primary action (laptop-friendly)
+  bg.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.defaultPrevented) return;
+    if ((e.target.tagName || '').toLowerCase() !== 'input') return;
+    const btn = [...bg.querySelectorAll('.foot .btn')].filter((b) => !b.classList.contains('secondary') && !b.classList.contains('ghost')).pop();
+    if (btn) { e.preventDefault(); btn.click(); }
+  });
   document.body.appendChild(bg);
   if (onMount) onMount(bg);
   return bg;
 }
 const closeModal = () => { const m = $('.modal-bg'); if (m) m.remove(); };
+
+// Laptop keyboard nav: Enter jumps to the next matching field (last one blurs/submits).
+function wireEnterNav(scope, selector, onLast) {
+  const inputs = [...scope.querySelectorAll(selector)];
+  inputs.forEach((inp, i) => inp.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault();
+    const next = inputs[i + 1];
+    if (next) { next.focus(); if (next.select) next.select(); }
+    else { inp.blur(); if (onLast) onLast(); }
+  }));
+}
 
 // ---------- boot ----------
 async function boot() {
@@ -491,7 +510,8 @@ function seTableRows(lines, editable) {
       const sold = editable
         ? `<div class="stepper">
              <button type="button" class="step-btn" data-step="-1" tabindex="-1">−</button>
-             <input class="sold-input" data-sku="${l.sku_id}" type="number" inputmode="numeric" min="0" step="1" value="${l.sales_qty}">
+             <input class="sold-input" data-sku="${l.sku_id}" type="number" inputmode="numeric" min="0" step="1"
+                    placeholder="0" value="${l.sales_qty > 0 ? l.sales_qty : ''}">
              <button type="button" class="step-btn" data-step="1" tabindex="-1">+</button>
            </div>`
         : `<b>${num(l.sales_qty)}</b>`;
@@ -547,15 +567,17 @@ function bindSeTable(root, shiftId) {
     const scheduleSave = () => { clearTimeout(timer); timer = setTimeout(commit, 450); };
     inp.addEventListener('input', () => { recalc(); scheduleSave(); });
     inp.addEventListener('change', commit);            // immediate on blur/Enter
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
     inp.addEventListener('focus', () => inp.select());
     // −/+ stepper buttons: update locally + debounced save (no flicker)
     const stepper = inp.closest('.stepper');
     if (stepper) stepper.querySelectorAll('.step-btn').forEach((btn) => btn.addEventListener('click', () => {
-      inp.value = Math.max(0, (Number(inp.value) || 0) + Number(btn.dataset.step));
+      const next = Math.max(0, (Number(inp.value) || 0) + Number(btn.dataset.step));
+      inp.value = next === 0 ? '' : next;              // keep "0" as a ghost hint
       recalc(); scheduleSave();
     }));
   });
+  // Enter moves to the next "продано" field (commit happens on blur)
+  wireEnterNav(root, '.sold-input');
 }
 
 async function openManualShift(point) {
@@ -564,11 +586,12 @@ async function openManualShift(point) {
   modal(`<h3>Утренний остаток — ${esc(point.name)}</h3>
     <div class="manual-open">${groups.map(([cat, items]) => `
       <div class="cat-label">${esc(cat)}</div>
-      ${items.map((s) => `<div class="row between manual-row"><span>${esc(s.name)} <span class="muted">${esc(s.article)}</span></span>
-        <input class="qty-input op-open" data-sku="${s.id}" type="number" value="0" min="0"></div>`).join('')}
+      ${items.map((s) => `<div class="row between manual-row"><span>${esc(s.name)}</span>
+        <input class="qty-input op-open" data-sku="${s.id}" type="number" placeholder="0" min="0"></div>`).join('')}
     `).join('')}</div>
     <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okOpen">Открыть смену</button></div>`,
     (bg) => {
+      wireEnterNav(bg, '.op-open', () => $('#okOpen', bg).focus());
       $('#okOpen', bg).onclick = async () => {
         const opening = [...bg.querySelectorAll('.op-open')].map((i) => ({ sku_id: Number(i.dataset.sku), qty: Number(i.value) || 0 }));
         const d = await api('/shifts/open', { method: 'POST', body: { point_id: point.id, carryover: false, opening } });
@@ -597,7 +620,7 @@ async function viewArrival(v) {
           ${items.map((l) => `<tr data-sku="${l.sku_id}" data-text="${esc((l.name + ' ' + l.article).toLowerCase())}">
             <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span></td>
             <td class="num">${num(l.current)}</td>
-            <td class="num"><input class="qty-input arr-input" data-sku="${l.sku_id}" type="number" min="0" value="0"></td>
+            <td class="num"><input class="qty-input arr-input" data-sku="${l.sku_id}" type="number" min="0" placeholder="0"></td>
           </tr>`).join('')}`).join('')}</tbody>
       </table>
     </div>
@@ -614,6 +637,7 @@ async function viewArrival(v) {
     } catch {}
   };
   bindTableTools(v, mine.id);
+  wireEnterNav(v, '.arr-input', () => { const b = $('#saveArr', v); if (b) b.focus(); });
 }
 
 // ---- Списание / возврат (заявки на апрув) ----
@@ -774,8 +798,10 @@ async function viewSeStock(v) {
       try { await api(`/skus/${inp.dataset.sku}/logistics`, { method: 'PUT', body: { safety_pct, lead_days } }); await load(); } catch {}
     }));
     bindTableTools(out, mine.id);
+    wireEnterNav(out, '.log-safe, .log-lead');
   };
   $('#fCalc', v).onclick = load;
+  wireEnterNav(v, '.filters input', load);   // Enter on filters → Рассчитать
   $('#expOrder', v).onclick = () => window.open(`/api/point-stock-forecast/${mine.id}/export.xlsx?${params()}`, '_blank');
   await load();
 }
@@ -854,7 +880,7 @@ async function viewNotes(v) {
     body.innerHTML = `
       <div class="composer" id="composer">
         <div class="composer-glow"></div>
-        <textarea id="noteText" rows="1" placeholder="Напишите заметку для коллег…"></textarea>
+        <textarea id="noteText" rows="1" placeholder="Напишите заметку для коллег…  (Enter — отправить, Shift+Enter — перенос строки)"></textarea>
         <div class="composer-bar">
           <div class="row wrap" style="gap:8px">
             <select id="noteImp" class="mini-select">
@@ -888,7 +914,8 @@ async function viewNotes(v) {
 
     autoGrow($('#noteText', v));
     $('#noteAdd', v).onclick = addNote;
-    $('#noteText', v).addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addNote(); });
+    // Enter — отправить заметку; Shift+Enter — перенос строки
+    $('#noteText', v).addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(); } });
     const ct = $('#closedToggle', v);
     if (ct) ct.onclick = () => { App.state.notesShowClosed = !App.state.notesShowClosed; const box = $('#closedBox', v); ct.classList.toggle('open'); box.style.display = App.state.notesShowClosed ? '' : 'none'; };
     body.querySelectorAll('[data-note]').forEach((cardEl) => bindNoteCard(cardEl, load));
@@ -1197,7 +1224,9 @@ async function doInventory(d) {
     <div class="grid">${d.lines.map((l) => `<div class="row between"><span>${esc(l.name)} <span class="muted">(расч: ${num(l.current)})</span></span>
       <input class="qty-input inv-q" data-sku="${l.sku_id}" type="number" value="${l.current}" min="0"></div>`).join('')}</div>
     <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okInv">Подтвердить</button></div>`,
-    (bg) => { $('#okInv', bg).onclick = async () => {
+    (bg) => {
+      wireEnterNav(bg, '.inv-q', () => $('#okInv', bg).focus());
+      $('#okInv', bg).onclick = async () => {
       const items = [...bg.querySelectorAll('.inv-q')].map((i) => ({ sku_id: Number(i.dataset.sku), new_qty: Number(i.value) || 0 }));
       try { await api('/inventory/perform', { method: 'POST', body: { shift_id: d.shift.id, items } }); closeModal(); toast('Инвентаризация проведена', 'ok'); renderShell(); } catch {}
     }; });
@@ -1303,6 +1332,7 @@ async function viewAnalytics(v) {
         <td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td><td class="num">${money(r.stock_value)}</td></tr>`).join('')}</tbody></table></div>`;
   };
   $('#apply').onclick = load;
+  wireEnterNav(v, '.filters input', load);
   $('#exp').onclick = () => { const q = new URLSearchParams(); if ($('#df').value) q.set('date_from', $('#df').value); if ($('#dt').value) q.set('date_to', $('#dt').value); window.open('/api/analytics/export.xlsx?' + q.toString(), '_blank'); };
   await load();
 }
