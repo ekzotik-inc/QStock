@@ -329,8 +329,30 @@ async function viewShift(v) {
         ${kpi('Стоимость остатка', money(t.stock_value), true)}
       </div>
       ${d.shift.needs_inventory ? `<div class="card" style="border-color:var(--warn);margin-bottom:16px"><b>Назначена инвентаризация.</b> Закрытие смены невозможно до её проведения.</div>` : ''}
-      <div class="stock-board">
-        ${d.lines.map((l) => skuCard(l, canEdit, d.shift.sale_mode)).join('')}
+      <div class="card" style="padding:0;overflow:auto">
+        <table class="shift-table">
+          <thead><tr>
+            <th>SKU</th>
+            <th class="num">Остаток утром</th>
+            <th class="num">Приход</th>
+            <th class="num">Продано за день</th>
+            <th class="num">Списание</th>
+            <th class="num">Остаток вечером</th>
+            <th class="num">Сумма продаж</th>
+            ${canEdit ? '<th>Операция</th>' : ''}
+          </tr></thead>
+          <tbody>${d.lines.map((l) => stockRow(l, canEdit)).join('')}</tbody>
+          <tfoot><tr>
+            <td>Итого</td>
+            <td class="num">${num(t.opening)}</td>
+            <td class="num">${num(t.income)}</td>
+            <td class="num">${num(t.sales_qty)}</td>
+            <td class="num">${num(t.writeoff)}</td>
+            <td class="num">${num(t.current)}</td>
+            <td class="num">${money(t.sales_value)}</td>
+            ${canEdit ? '<td></td>' : ''}
+          </tr></tfoot>
+        </table>
       </div>`;
     // Scope to the captured view container: realtime refreshes can re-run load()
     // while a re-render is in flight, leaving document-scoped lookups null.
@@ -339,35 +361,37 @@ async function viewShift(v) {
     if (canEdit) {
       const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
       const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
-      bindSkuCards(body, shiftId);
+      bindStockTable(body, shiftId);
     }
   };
   App._refresh = load; await load();
 }
 
-function skuCard(l, canEdit, saleMode) {
+function stockRow(l, canEdit) {
   const low = l.min_stock > 0 && l.current <= l.min_stock;
-  return `<div class="sku-card ${low ? 'low' : ''}" data-sku="${l.sku_id}">
-    <div class="row between"><div><div class="name">${esc(l.name)}</div><div class="art">${esc(l.article)} · ${money(l.price)}</div></div>
-      ${low ? '<span class="pill danger">низкий</span>' : ''}</div>
-    <div class="big">${num(l.current)}</div>
-    <div class="mini"><span>нач: <b>${num(l.opening)}</b></span><span>приход: <b>${num(l.income)}</b></span>
-      <span>продажи: <b>${num(l.sales_qty)}</b></span><span>списание: <b>${num(l.writeoff)}</b></span></div>
-    ${canEdit ? `<div class="op-row">
+  return `<tr class="${low ? 'row-low' : ''}" data-sku="${l.sku_id}">
+    <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
+    <td class="num">${num(l.opening)}</td>
+    <td class="num">${num(l.income)}</td>
+    <td class="num"><b>${num(l.sales_qty)}</b></td>
+    <td class="num">${num(l.writeoff)}</td>
+    <td class="num"><b class="${low ? 'evening-low' : ''}">${num(l.current)}</b>${low ? ' <span class="pill danger">низкий</span>' : ''}</td>
+    <td class="num">${money(l.sales_value)}</td>
+    ${canEdit ? `<td><div class="op-row">
       <input class="qty-input opq" type="number" value="1" min="0" step="1">
       <button class="btn sm" data-op="sale">Продажа</button>
       <button class="btn secondary sm" data-op="income">Приход</button>
       <button class="btn secondary sm" data-op="writeoff">Списание</button>
-      <button class="btn ghost sm" data-op="adjustment">= Остаток</button>
-    </div>` : ''}
-  </div>`;
+      <button class="btn ghost sm" data-op="adjustment">=</button>
+    </div></td>` : ''}
+  </tr>`;
 }
 
-function bindSkuCards(root, shiftId) {
-  root.querySelectorAll('.sku-card').forEach((card) => {
-    const skuId = Number(card.dataset.sku);
-    card.querySelectorAll('[data-op]').forEach((btn) => btn.onclick = async () => {
-      const qty = Number(card.querySelector('.opq').value);
+function bindStockTable(root, shiftId) {
+  root.querySelectorAll('tr[data-sku]').forEach((row) => {
+    const skuId = Number(row.dataset.sku);
+    row.querySelectorAll('[data-op]').forEach((btn) => btn.onclick = async () => {
+      const qty = Number(row.querySelector('.opq').value);
       if (!qty || qty <= 0) return toast('Введите количество', 'warn');
       try { await api(`/shifts/${shiftId}/op`, { method: 'POST', body: { sku_id: skuId, type: btn.dataset.op, qty } }); }
       catch {}
@@ -387,7 +411,40 @@ function confirmClose(d) {
       <div class="stat-line"><span>Конечный остаток</span><b>${num(t.current)} (${money(t.stock_value)})</b></div>
     </div>
     <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn dark" id="okClose">Подтвердить закрытие</button></div>`,
-    (bg) => { $('#okClose', bg).onclick = async () => { try { await api(`/shifts/${d.shift.id}/close`, { method: 'POST' }); closeModal(); toast('Смена закрыта', 'ok'); renderShell(); } catch {} }; });
+    (bg) => { $('#okClose', bg).onclick = async () => {
+      try {
+        const closed = await api(`/shifts/${d.shift.id}/close`, { method: 'POST' });
+        closeModal(); toast('Смена закрыта', 'ok');
+        showDayReport(closed);
+      } catch {}
+    }; });
+}
+
+// Краткий отчёт по смене (показывается после закрытия)
+function showDayReport(d) {
+  const t = d.totals;
+  const sold = d.lines.filter((l) => l.sales_qty > 0);
+  modal(`<h3>Краткий отчёт за смену</h3>
+    <div class="muted" style="margin-bottom:14px">${esc(d.shift.point_name)} · ${d.shift.business_date}</div>
+    <div class="kpis" style="margin-bottom:16px">
+      ${kpi('Продано (шт)', num(t.sales_qty))}
+      ${kpi('Сумма продаж', money(t.sales_value), true)}
+      ${kpi('Остаток вечером', num(t.current))}
+      ${kpi('Стоимость остатка', money(t.stock_value), true)}
+    </div>
+    <div class="card" style="padding:0;overflow:auto;box-shadow:none;border:1px solid var(--line)">
+      <table class="shift-table"><thead><tr>
+        <th>SKU</th><th class="num">Утром</th><th class="num">Продано</th><th class="num">Вечером</th><th class="num">Сумма</th>
+      </tr></thead>
+      <tbody>${(sold.length ? sold : d.lines).map((l) => `<tr>
+        <td>${esc(l.name)}</td><td class="num">${num(l.opening)}</td><td class="num"><b>${num(l.sales_qty)}</b></td>
+        <td class="num">${num(l.current)}</td><td class="num">${money(l.sales_value)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>Итого</td><td class="num">${num(t.opening)}</td><td class="num">${num(t.sales_qty)}</td>
+        <td class="num">${num(t.current)}</td><td class="num">${money(t.sales_value)}</td></tr></tfoot>
+      </table>
+    </div>
+    <div class="foot"><button class="btn" id="okReport">Готово</button></div>`,
+    (bg) => { $('#okReport', bg).onclick = () => { closeModal(); renderShell(); }; });
 }
 
 async function doInventory(d) {

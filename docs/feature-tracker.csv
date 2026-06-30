@@ -78,3 +78,5 @@ UX-01,UX,All,Login screen renders and submits on Enter,Enter key triggers login,
 UX-02,UX,SE,SE point selection + open shift flow,My point view shows connect then shift board,Verified,PASS,BUG-1 fixed: shift detail route was reset to default by nav guard (board unreachable); added DETAIL_ROUTES allowlist
 UX-03,UX,SE,Live SKU cards with quick actions,sku cards show current+ops and update live,Verified,PASS,
 UX-04,UX,All,Currency shown in Uzbek sum,money() renders сўм,Verified,PASS,
+UX-05,UX,SE,SE sees all SKU as a table (утром/приход/продано/списание/вечером/сумма),Shift view renders shift-table with per-SKU columns and totals,Verified,PASS,Redesigned from cards to table per user request
+UX-06,UX,SE,After closing a shift SE sees a short daily report,showDayReport modal shows sold qty/value and per-SKU summary,Verified,PASS,Added daily report on close

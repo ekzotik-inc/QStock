@@ -150,6 +150,16 @@ tr:hover td { background: var(--surface-2); }
 .bar-row .fill { height: 100%; background: var(--accent); border-radius: 8px; }
 .bar-row .val { width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
 
+/* SE shift table */
+.shift-table th, .shift-table td { white-space: nowrap; }
+.shift-table tbody td { font-size: 15px; }
+.shift-table tfoot td { font-weight: 700; background: var(--surface-2); border-top: 2px solid var(--line); }
+.shift-table .row-low td { background: #fff5f5; }
+.shift-table .evening-low { color: var(--danger); }
+.shift-table .op-row { gap: 4px; flex-wrap: nowrap; }
+.shift-table .op-row .qty-input { width: 56px; padding: 6px; }
+.shift-table .op-row .btn { padding: 6px 10px; font-size: 13px; }
+
 .empty { text-align: center; color: var(--ink-soft); padding: 40px; }
 .section-title { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); margin: 26px 0 12px; }
 .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 18px; }

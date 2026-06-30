@@ -55,25 +55,33 @@ async function loginAs(page, login, password) {
       await page.waitForTimeout(800);
     }
 
-    // THE BUG CHECK: shift board (sku cards) must be visible, not bounced to default
-    const boardVisible = await page.isVisible('.stock-board .sku-card');
-    check('UI-SE-SHIFT-BOARD', boardVisible, 'shift board with SKU cards renders (was the routing bug)');
+    // THE BUG CHECK: shift table must be visible, not bounced to default
+    const boardVisible = await page.isVisible('.shift-table tbody tr');
+    check('UI-SE-SHIFT-BOARD', boardVisible, 'shift table renders (was the routing bug)');
+
+    // table has the requested columns
+    const headers = (await page.$$eval('.shift-table thead th', (e) => e.map((x) => x.innerText))).join('|');
+    check('UI-SE-TABLE-COLUMNS', /УТРОМ/.test(headers) && /ПРОДАНО/.test(headers) && /ВЕЧЕРОМ/.test(headers),
+      'columns: утром/продано/вечером');
 
     if (boardVisible) {
-      // read first card current value, do a sale, expect change
-      const before = await page.locator('.sku-card .big').first().innerText();
-      await page.locator('.sku-card [data-op="sale"]').first().click();
+      // evening-stock cell (col 6) should change after a sale
+      const before = (await page.$$eval('.shift-table tbody tr:first-child td', (e) => e.map((x) => x.innerText)))[5];
+      await page.locator('.shift-table tbody tr [data-op="sale"]').first().click();
       await page.waitForTimeout(700);
-      const after = await page.locator('.sku-card .big').first().innerText();
-      check('UI-SE-SALE-LIVE', before !== after, `current ${before} -> ${after} after sale`);
+      const after = (await page.$$eval('.shift-table tbody tr:first-child td', (e) => e.map((x) => x.innerText)))[5];
+      check('UI-SE-SALE-LIVE', before !== after, `evening ${before} -> ${after} after sale`);
 
-      // close shift flow
+      // close shift -> daily report
       if (await page.isVisible('#closeBtn')) {
         await page.click('#closeBtn');
         await page.waitForSelector('.modal', { timeout: 3000 });
         check('UI-SE-CLOSE-SUMMARY', await page.isVisible('#okClose'), 'close summary modal shows');
         await page.click('#okClose');
         await page.waitForTimeout(800);
+        check('UI-SE-DAY-REPORT', await page.isVisible('#okReport'), 'daily report shows after close');
+        if (await page.isVisible('#okReport')) await page.click('#okReport');
+        await page.waitForTimeout(400);
       }
     }
 
