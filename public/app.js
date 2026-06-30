@@ -1026,7 +1026,6 @@ async function viewShift(v) {
         ${kpi('Текущий остаток', num(t.current))}
         ${kpi('Продажи (шт)', num(t.sales_qty))}
         ${kpi('Сумма продаж', money(t.sales_value), true)}
-        ${kpi('Стоимость остатка', money(t.stock_value), true)}
       </div>
       ${d.shift.needs_inventory ? `<div class="card" style="border-color:var(--warn);margin-bottom:16px"><b>Назначена инвентаризация.</b> Закрытие смены невозможно до её проведения.</div>` : ''}
       <div class="card" style="padding:0;overflow:auto">
@@ -1071,13 +1070,13 @@ function stockRow(l, canEdit) {
   const low = l.min_stock > 0 && l.current <= l.min_stock;
   // SE doesn't need the article; admins/BRE still see it
   const sub = App.user.role === 'SE' ? money(l.price) : `${esc(l.article)} · ${money(l.price)}`;
-  return `<tr class="${low ? 'row-low' : ''}" data-sku="${l.sku_id}">
+  return `<tr data-sku="${l.sku_id}">
     <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${sub}</div></td>
     <td class="num">${num(l.opening)}</td>
     <td class="num">${num(l.income)}</td>
     <td class="num"><b>${num(l.sales_qty)}</b></td>
     <td class="num">${num(l.writeoff)}</td>
-    <td class="num"><b class="${low ? 'evening-low' : ''}">${num(l.current)}</b>${low ? ' <span class="pill danger">низкий</span>' : ''}</td>
+    <td class="num"><b class="${low ? 'evening-low' : ''}">${num(l.current)}</b></td>
     <td class="num">${money(l.sales_value)}</td>
     ${canEdit ? `<td><div class="op-row">
       <input class="qty-input opq" type="number" value="1" min="0" step="1">
