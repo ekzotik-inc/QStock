@@ -117,10 +117,13 @@ function navItems() {
   return items;
 }
 
+// Detail routes that are reachable without a sidebar nav entry.
+const DETAIL_ROUTES = ['shift'];
+
 function renderShell() {
   loadNotifications();
   const items = navItems();
-  if (!items.find((i) => i[0] === App.route)) App.route = items[0][0];
+  if (!items.find((i) => i[0] === App.route) && !DETAIL_ROUTES.includes(App.route)) App.route = items[0][0];
   const shell = el(`
     <div class="shell">
       <aside class="sidebar">
@@ -329,10 +332,13 @@ async function viewShift(v) {
       <div class="stock-board">
         ${d.lines.map((l) => skuCard(l, canEdit, d.shift.sale_mode)).join('')}
       </div>`;
-    $('#backBtn').onclick = () => { App.route = App.user.role === 'SE' ? 'mypoint' : 'shifts'; renderShell(); };
+    // Scope to the captured view container: realtime refreshes can re-run load()
+    // while a re-render is in flight, leaving document-scoped lookups null.
+    const backBtn = $('#backBtn', v);
+    if (backBtn) backBtn.onclick = () => { App.route = App.user.role === 'SE' ? 'mypoint' : 'shifts'; renderShell(); };
     if (canEdit) {
-      $('#closeBtn').onclick = () => confirmClose(d);
-      $('#invBtn').onclick = () => doInventory(d);
+      const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
+      const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
       bindSkuCards(body, shiftId);
     }
   };
