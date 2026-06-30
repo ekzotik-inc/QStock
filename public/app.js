@@ -419,7 +419,7 @@ async function openSkuMovements(skuId, name, pointId) {
       <tbody>${rows.map((m) => `<tr><td>${fmtDate(m.created_at)}</td><td>${opLabel[m.type] || m.type}</td>
         <td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${emp(m.user_name)}</td></tr>`).join('')}</tbody>
     </table></div>` : '<div class="empty">Движений пока нет.</div>'}
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Закрыть</button></div>`);
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Закрыть</button></div>`);
 }
 
 function pointPicker(v, body) {
@@ -591,7 +591,7 @@ async function openManualShift(point) {
       ${items.map((s) => `<div class="row between manual-row"><span>${esc(s.name)}</span>
         <input class="qty-input op-open" data-sku="${s.id}" type="number" placeholder="0" min="0"></div>`).join('')}
     `).join('')}</div>
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okOpen">Открыть смену</button></div>`,
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okOpen">Открыть смену</button></div>`,
     (bg) => {
       wireEnterNav(bg, '.op-open', () => $('#okOpen', bg).focus());
       $('#okOpen', bg).onclick = async () => {
@@ -711,7 +711,7 @@ async function viewApprovals(v) {
           <td>${fmtDate(r.created_at)}</td><td>${esc(r.point_name)}</td><td>${esc(r.sku_name)}</td>
           <td>${r.type === 'return' ? 'Возврат' : 'Списание'}</td><td class="num">${num(r.qty)}</td>
           <td>${emp(r.requested_by_name)}</td><td><span class="muted">${esc(r.comment || '')}</span></td>
-          <td class="num"><button class="btn sm" data-ok="${r.id}">Одобрить</button>
+          <td class="num"><button class="btn ok sm" data-ok="${r.id}">Одобрить</button>
             <button class="btn danger sm" data-no="${r.id}">Отклонить</button></td>
         </tr>`).join('')}</tbody></table></div>` : '<div class="empty">Нет заявок на согласовании.</div>'}
       <div class="section-title">История решений</div>
@@ -1015,7 +1015,7 @@ async function viewShift(v) {
     v.innerHTML = topbar(d.shift.point_name + ' · смена #' + d.shift.id,
       `${canEdit ? `<button class="btn secondary sm" id="invBtn">Инвентаризация</button>` : ''}
        ${canEdit ? `<button class="btn dark sm" id="closeBtn">Закрыть смену</button>` : ''}
-       <button class="btn ghost sm" id="backBtn">Назад</button>`);
+       <button class="btn back sm" id="backBtn">Назад</button>`);
     const body = el('<div></div>'); v.appendChild(body);
     body.innerHTML = `
       <div class="row between wrap" style="margin-bottom:8px">
@@ -1111,7 +1111,7 @@ function confirmClose(d) {
       <div class="stat-line"><span>Списание</span><b>${num(t.writeoff)}</b></div>
       <div class="stat-line"><span>Конечный остаток</span><b>${num(t.current)} (${money(t.stock_value)})</b></div>
     </div>
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn dark" id="okClose">Подтвердить закрытие</button></div>`,
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okClose">Подтвердить закрытие</button></div>`,
     (bg) => { $('#okClose', bg).onclick = async () => {
       try {
         const closed = await api(`/shifts/${d.shift.id}/close`, { method: 'POST' });
@@ -1238,7 +1238,7 @@ async function doInventory(d) {
   modal(`<h3>Инвентаризация — фактический остаток</h3>
     <div class="grid">${d.lines.map((l) => `<div class="row between"><span>${esc(l.name)} <span class="muted">(расч: ${num(l.current)})</span></span>
       <input class="qty-input inv-q" data-sku="${l.sku_id}" type="number" value="${l.current}" min="0"></div>`).join('')}</div>
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okInv">Подтвердить</button></div>`,
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okInv">Подтвердить</button></div>`,
     (bg) => {
       wireEnterNav(bg, '.inv-q', () => $('#okInv', bg).focus());
       $('#okInv', bg).onclick = async () => {
@@ -1290,7 +1290,7 @@ async function pointForm(p) {
     <div class="field" style="flex:1"><label>Режим продаж</label><select id="ps"><option value="per_sale" ${p?.sale_mode === 'per_sale' ? 'selected' : ''}>По продаже</option><option value="summary" ${p?.sale_mode === 'summary' ? 'selected' : ''}>Суммарно</option></select></div></div>
     <div class="row"><div class="field" style="flex:1"><label>Статус</label><select id="pst"><option value="active" ${p?.status === 'active' ? 'selected' : ''}>Активна</option><option value="inactive" ${p?.status === 'inactive' ? 'selected' : ''}>Неактивна</option></select></div>
     <div class="field" style="flex:1"><label>Время закрытия (HH:MM)</label><input id="pe" value="${esc(p?.shift_end_time || '')}"></div></div>
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okP">Сохранить</button></div>`,
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okP">Сохранить</button></div>`,
     (bg) => { $('#okP', bg).onclick = async () => {
       const body = { name: $('#pn', bg).value, address: $('#pa', bg).value, bre_id: $('#pb', bg).value || null,
         max_se: Number($('#pm', bg).value), sale_mode: $('#ps', bg).value, status: $('#pst', bg).value, shift_end_time: $('#pe', bg).value || null };
@@ -1436,7 +1436,7 @@ function skuForm(s) {
     <div class="row"><div class="field" style="flex:1"><label>Цена</label><input id="sp" type="number" value="${s?.price || 0}"></div>
     <div class="field" style="flex:1"><label>Мин. остаток</label><input id="sm" type="number" value="${s?.min_stock || 0}"></div></div>
     ${s ? `<div class="field"><label>Комментарий к изменению цены</label><input id="spc" placeholder="необязательно"></div>` : ''}
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okS">Сохранить</button></div>`,
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okS">Сохранить</button></div>`,
     (bg) => { $('#okS', bg).onclick = async () => {
       const body = { name: $('#sn', bg).value, article: $('#sa', bg).value, category: $('#sc', bg).value,
         price: Number($('#sp', bg).value), min_stock: Number($('#sm', bg).value) };
@@ -1448,7 +1448,7 @@ function skuForm(s) {
 async function priceHistory(id) {
   const rows = await api(`/skus/${id}/price-history`);
   modal(`<h3>История цен</h3>${rows.length ? rows.map((r) => `<div class="stat-line"><span>${fmtDate(r.created_at)} · ${esc(r.user_name || '')}${r.comment ? ' · ' + esc(r.comment) : ''}</span><b>${r.old_price == null ? '—' : money(r.old_price)} → ${money(r.new_price)}</b></div>`).join('') : '<div class="empty">Нет изменений</div>'}
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Закрыть</button></div>`);
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Закрыть</button></div>`);
 }
 
 // ============================================================
@@ -1477,7 +1477,7 @@ function userForm(u) {
     <div class="field" style="flex:1"><label>Роль</label><select id="ur"><option value="SE" ${u?.role === 'SE' ? 'selected' : ''}>Sales Expert</option><option value="BRE" ${u?.role === 'BRE' ? 'selected' : ''}>BRE</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Администратор</option></select></div></div>
     <div class="row"><div class="field" style="flex:1"><label>Пароль ${u ? '(оставьте пустым)' : ''}</label><input id="up" type="password"></div>
     <div class="field" style="flex:1"><label>Статус</label><select id="us"><option value="active" ${u?.status === 'active' ? 'selected' : ''}>Активен</option><option value="blocked" ${u?.status === 'blocked' ? 'selected' : ''}>Заблокирован</option></select></div></div>
-    <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okU">Сохранить</button></div>`,
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okU">Сохранить</button></div>`,
     (bg) => { $('#okU', bg).onclick = async () => {
       const body = { full_name: $('#uf', bg).value, role: $('#ur', bg).value, status: $('#us', bg).value };
       const pw = $('#up', bg).value; if (pw) body.password = pw;
@@ -1507,7 +1507,7 @@ async function viewSchedules(v) {
       <div class="field"><label>Точки</label><select id="scP" multiple size="5" style="height:auto">${points.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Частота</label><select id="scF"><option value="daily">Ежедневно</option><option value="weekly">Еженедельно</option><option value="monthly">Ежемесячно</option><option value="manual">Вручную</option></select></div>
       <div class="field"><label>Дата старта (необязательно)</label><input id="scD" type="date"></div>
-      <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okSc">Создать</button></div>`,
+      <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okSc">Создать</button></div>`,
       (bg) => { $('#okSc', bg).onclick = async () => {
         const point_ids = [...$('#scP', bg).selectedOptions].map((o) => Number(o.value));
         if (!point_ids.length) return toast('Выберите точки', 'warn');
