@@ -947,8 +947,8 @@ function drawReportCanvas(d) {
   const sold = d.lines.filter((l) => l.sales_qty > 0);
   const list = sold.length ? sold : d.lines;
   const surface = cssVar('--surface'), ink = cssVar('--ink'), inkSoft = cssVar('--ink-soft'),
-    accent = cssVar('--accent-ink'), line = cssVar('--line'), s2 = cssVar('--surface-2'), s3 = cssVar('--surface-3');
-  const W = 760, pad = 28, kpiTop = 104, kpiH = 74, headH = 38, rowH = 34;
+    accent = cssVar('--accent-ink'), line = cssVar('--line'), s2 = cssVar('--surface-2'), s3 = cssVar('--surface-3'), mint = cssVar('--mint');
+  const W = 760, pad = 28, kpiTop = 158, kpiH = 74, headH = 38, rowH = 34;
   const tableTop = kpiTop + kpiH + 26;
   const H = tableTop + headH + list.length * rowH + headH + pad;
   const dpr = 2;
@@ -957,7 +957,15 @@ function drawReportCanvas(d) {
   ctx.fillStyle = surface; ctx.fillRect(0, 0, W, H);
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   ctx.fillStyle = ink; ctx.font = '800 24px Manrope, Arial'; ctx.fillText('Краткий отчёт за смену', pad, 46);
-  ctx.fillStyle = inkSoft; ctx.font = '14px Manrope, Arial'; ctx.fillText(`${d.shift.point_name} · ${d.shift.business_date}`, pad, 70);
+  // point name in mint + business date
+  ctx.font = '800 17px Manrope, Arial'; ctx.fillStyle = mint;
+  ctx.fillText(d.shift.point_name, pad, 78);
+  const pnW = ctx.measureText(d.shift.point_name).width;
+  ctx.fillStyle = inkSoft; ctx.font = '15px Manrope, Arial'; ctx.fillText(` · ${d.shift.business_date}`, pad + pnW, 78);
+  // who opened / closed
+  ctx.fillStyle = inkSoft; ctx.font = '13px Manrope, Arial';
+  ctx.fillText(`Смену открыл: ${d.shift.opened_by_name || '—'} · ${fmtDate(d.shift.opened_at)}`, pad, 104);
+  ctx.fillText(`Смену закрыл: ${d.shift.closed_by_name || '—'} · ${fmtDate(d.shift.closed_at)}`, pad, 126);
   const kpis = [['ПРОДАНО (ШТ)', num(t.sales_qty), ink], ['СУММА ПРОДАЖ', money(t.sales_value), accent], ['СТОИМОСТЬ ОСТАТКА', money(t.stock_value), accent]];
   const gap = 14, bw = (W - pad * 2 - gap * 2) / 3;
   kpis.forEach((k, i) => {
@@ -1001,7 +1009,13 @@ function showDayReport(d) {
   const t = d.totals;
   const sold = d.lines.filter((l) => l.sales_qty > 0);
   modal(`<h3>Краткий отчёт за смену</h3>
-    <div class="muted" style="margin-bottom:14px">${esc(d.shift.point_name)} · ${d.shift.business_date}</div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:17px;font-weight:800"><span class="mint">${esc(d.shift.point_name)}</span> · ${d.shift.business_date}</div>
+      <div class="muted" style="font-size:13px;margin-top:6px;line-height:1.7">
+        Смену открыл: <b>${esc(d.shift.opened_by_name || '—')}</b> · ${fmtDate(d.shift.opened_at)}<br>
+        Смену закрыл: <b>${esc(d.shift.closed_by_name || '—')}</b> · ${fmtDate(d.shift.closed_at)}
+      </div>
+    </div>
     <div class="kpis" style="margin-bottom:16px">
       ${kpi('Продано (шт)', num(t.sales_qty))}
       ${kpi('Сумма продаж', money(t.sales_value), true)}

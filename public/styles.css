@@ -15,6 +15,7 @@
   --accent-ink: #008a8c;
   --accent-weak: #e2fafa;
   --accent-contrast: #04302f;
+  --mint: #0bb3a0;
   --ok: #12a07a; --ok-weak: #e0f5ee;
   --warn: #cf8a2c; --warn-weak: #fbeed7;
   --danger: #e0574f; --danger-weak: #fbe6e4;
@@ -42,6 +43,7 @@ html[data-theme="dark"] {
   --accent-ink: #5fe6e6;
   --accent-weak: #11302f;
   --accent-contrast: #04231f;
+  --mint: #4fe3d0;
   --ok: #2bb98c; --ok-weak: #123028;
   --warn: #d99a3e; --warn-weak: #2e2616;
   --danger: #e86a62; --danger-weak: #2f1c1b;
@@ -242,6 +244,7 @@ td { color: var(--ink-2); }
 .modal-bg { position: fixed; inset: 0; background: rgba(10, 22, 24, .55); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 50; padding: 20px; animation: fadeIn .2s var(--ease); }
 .modal { background: var(--surface); border-radius: 22px; padding: 30px; width: 100%; max-width: 580px; box-shadow: var(--shadow-lg); max-height: 90vh; overflow: auto; border: 1px solid var(--line); animation: pop .26s var(--ease) both; }
 .modal.wide { max-width: 820px; }
+.mint { color: var(--mint); }
 .modal h3 { margin: 0 0 18px; font-size: 21px; font-weight: 800; letter-spacing: -.4px; }
 .modal .foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
 
