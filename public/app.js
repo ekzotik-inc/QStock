@@ -916,7 +916,7 @@ function autoGrow(ta) {
 
 function noteCard(n, isNew) {
   return `<div class="note-card imp-${n.importance} ${n.pinned ? 'pinned' : ''} ${n.status === 'closed' ? 'is-closed' : ''} ${isNew ? 'pop' : ''}" data-note="${n.id}">
-    <div class="row between" style="align-items:flex-start">
+    <div class="row between note-head" style="align-items:center;gap:8px">
       <div class="row" style="gap:6px;flex-wrap:wrap">
         <span class="pill imp-pill ${n.importance}">${NOTE_IMP[n.importance]}</span>
         <span class="pill ${n.status === 'closed' ? 'closed' : n.status === 'pending' ? 'inv' : 'open'}">${NOTE_STATUS[n.status]}</span>
@@ -927,12 +927,12 @@ function noteCard(n, isNew) {
     <div class="row between note-foot">
       <span class="muted">${esc(n.author_name || '—')} · ${fmtDate(n.created_at)}</span>
       <div class="row" style="gap:6px">
-        <select class="mini-select" data-status>
+        <select class="mini-select note-status-sel" data-status>
           <option value="open" ${n.status === 'open' ? 'selected' : ''}>Открыто</option>
           <option value="pending" ${n.status === 'pending' ? 'selected' : ''}>В ожидании</option>
           <option value="closed" ${n.status === 'closed' ? 'selected' : ''}>Закрыто</option>
         </select>
-        <button class="btn ghost sm" data-del title="Удалить">✕</button>
+        <button class="note-del" data-del title="Удалить">✕</button>
       </div>
     </div>
   </div>`;
