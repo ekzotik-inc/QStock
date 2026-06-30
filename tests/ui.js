@@ -95,6 +95,13 @@ async function loginAs(page, login, password) {
         check('UI-SE-HISTORY', await page.isVisible('table tbody tr'), 'closed shift in history');
         await page.click('.nav a[data-route="selogs"]'); await page.waitForTimeout(600);
         check('UI-SE-LOGS', await page.isVisible('table tbody tr'), 'logs visible');
+
+        // Запасы в точке (forecast)
+        await page.click('.nav a[data-route="sestock"]'); await page.waitForTimeout(700);
+        const fHeaders = (await page.$$eval('.se-shift thead th', (e) => e.map((x) => x.innerText))).join('|');
+        check('UI-SE-FORECAST', /ЗАКАЗАТЬ/.test(fHeaders) && /СРЕДН/.test(fHeaders), fHeaders);
+        // no red low-stock rows anywhere for SE
+        check('UI-SE-NO-RED', (await page.$$('.row-low')).length === 0, 'no red low-stock rows for SE');
       }
     }
 

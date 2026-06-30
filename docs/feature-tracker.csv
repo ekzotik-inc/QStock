@@ -89,3 +89,5 @@ SE-06,SE Cabinet,SE,Закрытие смены -> краткий отчёт д�
 SE-07,SE Cabinet,SE,История смен shows closed shifts (view only) for the point,GET /shifts?point_id&status=closed; read-only detail,Verified,PASS,
 SE-08,SE Cabinet,SE,Логи show friendly point activity (no technical data),GET /point-logs/:pointId,Verified,PASS,
 SE-09,SE Cabinet,SE,Warm matte IQOS style with smooth animations,fade-in animations; warm matte palette,Verified,PASS,
+SE-10,SE Cabinet,SE,SE table no longer flags low stock with red,seTableRows has no row-low/danger styling,Verified,PASS,Replaced by forecast tab
+SE-11,SE Cabinet,SE,Запасы в точке forecasts needed stock from avg daily sales,GET /point-stock-forecast: avg=sold/days; recommended=ceil(avg*horizon); reorder=max(0,rec-current),Verified,PASS,Configurable analysis/horizon days

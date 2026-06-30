@@ -116,6 +116,7 @@ function navItems() {
     return [
       ['myshift', 'Моя смена'],
       ['arrival', 'Новое поступление'],
+      ['sestock', 'Запасы в точке'],
       ['shifthistory', 'История смен'],
       ['selogs', 'Логи'],
     ];
@@ -189,6 +190,7 @@ const ICON = {
   arrival: SVG('<path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M12 22V12M3.3 7L12 12l8.7-5"/>'),
   shifthistory: SVG('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>'),
   selogs: SVG('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>'),
+  sestock: SVG('<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v6l9 4 9-4V7"/><path d="M3 13v4l9 4 9-4v-4"/>'),
 };
 const navIcon = (route) => ICON[route] || ICON.dashboard;
 
@@ -243,7 +245,8 @@ function renderRoute() {
     shift: viewShift, shifts: viewShifts, analytics: viewAnalytics, kpi: viewKpi,
     movements: viewMovements, skus: viewSkus, users: viewUsers, schedules: viewSchedules, audit: viewAudit,
     // SE cabinet
-    myshift: viewMyShift, arrival: viewArrival, shifthistory: viewShiftHistory, selogs: viewSeLogs,
+    myshift: viewMyShift, arrival: viewArrival, sestock: viewSeStock,
+    shifthistory: viewShiftHistory, selogs: viewSeLogs,
   };
   const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
   (routes[App.route] || fallback)(v);
@@ -402,16 +405,15 @@ function seTableRows(lines, editable) {
   return groupByCategory(lines).map(([cat, items]) => {
     const head = `<tr class="cat-row"><td colspan="4">${esc(cat)}</td></tr>`;
     const rows = items.map((l) => {
-      const low = l.min_stock > 0 && l.current <= l.min_stock;
       const morning = `${num(l.opening)}${l.income > 0 ? ` <span class="inc-plus">+${num(l.income)}</span>` : ''}`;
       const sold = editable
         ? `<input class="qty-input sold-input" data-sku="${l.sku_id}" type="number" min="0" step="1" value="${l.sales_qty}">`
         : `<b>${num(l.sales_qty)}</b>`;
-      return `<tr class="${low ? 'row-low' : ''}" data-sku="${l.sku_id}">
+      return `<tr data-sku="${l.sku_id}">
         <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
         <td class="num">${morning}</td>
         <td class="num sold-cell">${sold}</td>
-        <td class="num"><b class="${low ? 'evening-low' : ''}">${num(l.current)}</b>${low ? ' <span class="pill danger">низкий</span>' : ''}</td>
+        <td class="num"><b>${num(l.current)}</b></td>
       </tr>`;
     }).join('');
     return head + rows;
@@ -487,6 +489,66 @@ async function viewArrival(v) {
       App.route = 'myshift'; renderShell();
     } catch {}
   };
+}
+
+// ---- Запасы в точке (прогноз) ----
+async function viewSeStock(v) {
+  v.innerHTML = topbar('Запасы в точке');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const mine = await getMyPoint();
+  if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+
+  body.innerHTML = `
+    <div class="filters">
+      <div class="field"><label>Анализировать продажи за (дней)</label><input id="fDays" type="number" min="1" max="90" value="7"></div>
+      <div class="field"><label>Прогноз запаса на (дней)</label><input id="fHor" type="number" min="1" max="90" value="7"></div>
+      <button class="btn sm" id="fCalc">Рассчитать</button>
+    </div>
+    <div class="muted" style="margin-bottom:16px">Средние продажи в день рассчитываются по фактическим продажам за выбранный период.
+      Рекомендуемый запас = средние продажи × дни прогноза. «Заказать» = рекомендуемый запас − текущий остаток.</div>
+    <div id="forecastOut"></div>`;
+
+  const load = async () => {
+    const days = Number($('#fDays', v).value) || 7;
+    const horizon = Number($('#fHor', v).value) || 7;
+    const d = await api(`/point-stock-forecast/${mine.id}?days=${days}&horizon=${horizon}`);
+    const out = $('#forecastOut', v);
+    const totalReorder = d.rows.reduce((a, r) => a + r.reorder, 0);
+    out.innerHTML = `
+      <div class="kpis">
+        ${kpi('Период анализа', d.days + ' дн.')}
+        ${kpi('Прогноз на', d.horizon + ' дн.')}
+        ${kpi('Позиций к заказу', d.rows.filter((r) => r.reorder > 0).length)}
+        ${kpi('Всего заказать (шт)', num(totalReorder), true)}
+      </div>
+      <div class="table-wrap">
+        <table class="shift-table se-shift">
+          <thead><tr>
+            <th>SKU</th>
+            <th class="num">Продано за ${d.days} дн.</th>
+            <th class="num">Средн./день</th>
+            <th class="num">Текущий остаток</th>
+            <th class="num">Хватит на</th>
+            <th class="num">Нужно на ${d.horizon} дн.</th>
+            <th class="num">Заказать</th>
+          </tr></thead>
+          <tbody>${groupByCategory(d.rows).map(([cat, items]) => `
+            <tr class="cat-row"><td colspan="7">${esc(cat)}</td></tr>
+            ${items.map((r) => `<tr data-sku="${r.sku_id}">
+              <td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(r.article)}</div></td>
+              <td class="num">${num(r.sold)}</td>
+              <td class="num">${num(r.per_day)}</td>
+              <td class="num">${num(r.current)}</td>
+              <td class="num">${r.days_left == null ? '—' : r.days_left + ' дн.'}</td>
+              <td class="num">${num(r.recommended)}</td>
+              <td class="num">${r.reorder > 0 ? `<span class="reorder-pill">+${num(r.reorder)}</span>` : '<span class="muted">—</span>'}</td>
+            </tr>`).join('')}`).join('')}</tbody>
+        </table>
+      </div>`;
+  };
+  $('#fCalc', v).onclick = load;
+  await load();
 }
 
 // ---- История смен ----

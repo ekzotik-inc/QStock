@@ -3,6 +3,7 @@ const express = require('express');
 const db = require('../db');
 const { authRequired, requireRole } = require('../auth');
 const { canSeePoint, visiblePointIds } = require('../access');
+const { currentStock } = require('../util');
 
 const router = express.Router();
 
@@ -40,6 +41,51 @@ router.get('/point-logs/:pointId', authRequired, (req, res) => {
   }
   const all = [...moves, ...events].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 300);
   res.json(all);
+});
+
+// Stock forecast for a point: average daily sales over `days`, projected stock
+// need for `horizon` days, and suggested reorder qty.
+router.get('/point-stock-forecast/:pointId', authRequired, (req, res) => {
+  const pid = Number(req.params.pointId);
+  const isSEhere = !!db.prepare('SELECT 1 FROM point_se WHERE se_id=? AND point_id=?').get(req.user.id, pid);
+  if (!isSEhere && !canSeePoint(req.user, pid)) return res.status(403).json({ error: 'Нет доступа' });
+
+  const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+  const horizon = Math.min(Math.max(Number(req.query.horizon) || 7, 1), 90);
+
+  // net sold per SKU over the window (negative correction deltas included)
+  const soldRows = db.prepare(
+    `SELECT sa.sku_id, COALESCE(SUM(sa.qty), 0) AS sold
+     FROM sales sa JOIN shifts sh ON sh.id = sa.shift_id
+     WHERE sh.point_id = ? AND sa.created_at >= datetime('now', ?)
+     GROUP BY sa.sku_id`
+  ).all(pid, `-${days} days`);
+  const soldBy = new Map(soldRows.map((r) => [r.sku_id, r.sold]));
+
+  // current stock per SKU: take the latest shift (open or most recent closed)
+  const latest = db.prepare('SELECT id FROM shifts WHERE point_id=? ORDER BY id DESC LIMIT 1').get(pid);
+  const curBy = new Map();
+  if (latest) {
+    for (const ss of db.prepare('SELECT * FROM shift_stock WHERE shift_id=?').all(latest.id)) {
+      curBy.set(ss.sku_id, currentStock(ss));
+    }
+  }
+
+  const skus = db.prepare('SELECT * FROM skus WHERE active = 1 ORDER BY category, name').all();
+  const rows = skus.map((s) => {
+    const sold = soldBy.get(s.id) || 0;
+    const perDay = sold / days;
+    const current = curBy.get(s.id) || 0;
+    const recommended = Math.ceil(perDay * horizon);
+    const reorder = Math.max(0, recommended - current);
+    const daysLeft = perDay > 0 ? Math.floor(current / perDay) : null; // на сколько дней хватит
+    return {
+      sku_id: s.id, name: s.name, article: s.article, category: s.category,
+      sold, per_day: Math.round(perDay * 100) / 100, current,
+      recommended, reorder, days_left: daysLeft,
+    };
+  });
+  res.json({ days, horizon, rows });
 });
 
 // SKU movement history (scoped by role)
