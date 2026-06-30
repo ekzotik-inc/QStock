@@ -15,4 +15,4 @@ services:
       - key: QSTOCK_SECRET
         generateValue: true  # Render сам сгенерирует надёжный секрет
       - key: QSTOCK_DB
-        value: /var/data/qstock.db
+        value: /opt/render/project/src/data/qstock.db   # writable; на free диске нет, данные временные
