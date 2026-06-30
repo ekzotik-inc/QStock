@@ -174,7 +174,23 @@ CREATE INDEX IF NOT EXISTS idx_movements_sku ON movements(sku_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_movements_point ON movements(point_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sales_shift ON sales(shift_id);
 CREATE INDEX IF NOT EXISTS idx_shifts_point ON shifts(point_id, status);
+CREATE TABLE IF NOT EXISTS stock_requests (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  point_id     INTEGER NOT NULL REFERENCES points(id),
+  shift_id     INTEGER REFERENCES shifts(id),
+  sku_id       INTEGER NOT NULL REFERENCES skus(id),
+  type         TEXT NOT NULL CHECK(type IN ('writeoff','return')),
+  qty          REAL NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+  comment      TEXT,
+  requested_by INTEGER REFERENCES users(id),
+  decided_by   INTEGER REFERENCES users(id),
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  decided_at   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_requests_point ON stock_requests(point_id, status);
 `);
 
 // --- lightweight migrations (add columns if missing) ---
@@ -184,5 +200,6 @@ function addColumn(table, col, def) {
 }
 addColumn('skus', 'safety_pct', 'REAL');   // per-SKU safety stock %, null = use default
 addColumn('skus', 'lead_days', 'REAL');    // per-SKU supplier lead time, null = use default
+addColumn('shift_stock', 'adjust', 'REAL NOT NULL DEFAULT 0'); // approved writeoff/return net effect
 
 module.exports = db;

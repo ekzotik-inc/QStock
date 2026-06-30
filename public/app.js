@@ -64,6 +64,9 @@ function connectSocket() {
     App.notifications.unshift({ id: Date.now(), type: n.type, payload: n.payload, is_read: 0, created_at: new Date().toISOString() });
     renderBell();
     toast(notifText(n.type, n.payload), n.type.includes('low') || n.type.includes('overdue') ? 'warn' : '');
+    // live-refresh the approvals inbox / writeoff list when a request comes/decides
+    if ((n.type === 'request_new' || n.type === 'request_decided') &&
+        (App.route === 'approvals' || App.route === 'writeoff' || App.route === 'myshift') && App._refresh) App._refresh();
   });
   ['stock:update', 'sale:new', 'shift:changed', 'point:changed', 'sku:changed'].forEach((ev) => {
     App.socket.on(ev, (data) => handleRealtime(ev, data));
@@ -116,6 +119,7 @@ function navItems() {
     return [
       ['myshift', 'Моя смена'],
       ['arrival', 'Новое поступление'],
+      ['writeoff', 'Списание / возврат'],
       ['sestock', 'Запасы в точке'],
       ['shifthistory', 'История смен'],
       ['selogs', 'Логи'],
@@ -124,6 +128,7 @@ function navItems() {
   const items = [];
   if (r === 'ADMIN' || r === 'BRE') items.push(['dashboard', 'Дашборд']);
   if (r === 'ADMIN' || r === 'BRE') items.push(['points', 'Торговые точки']);
+  if (r === 'ADMIN' || r === 'BRE') items.push(['approvals', 'Заявки']);
   items.push(['shifts', 'Смены']);
   if (r === 'ADMIN' || r === 'BRE') items.push(['analytics', 'Аналитика']);
   if (r === 'ADMIN' || r === 'BRE') items.push(['kpi', 'KPI']);
@@ -191,6 +196,8 @@ const ICON = {
   shifthistory: SVG('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>'),
   selogs: SVG('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>'),
   sestock: SVG('<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v6l9 4 9-4V7"/><path d="M3 13v4l9 4 9-4v-4"/>'),
+  writeoff: SVG('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/><path d="M10 11h4"/>'),
+  approvals: SVG('<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
 };
 const navIcon = (route) => ICON[route] || ICON.dashboard;
 
@@ -232,6 +239,8 @@ function notifText(type, p = {}) {
     case 'low_stock': return `Критически низкий остаток: ${p.sku_name || ''} на «${p.point_name || ''}» — ${num(p.current)} (мин ${num(p.min_stock)})`;
     case 'shift_overdue': return `Не закрыта смена на «${p.point_name || ''}» (${p.business_date || ''})`;
     case 'inventory_assigned': return `Назначена инвентаризация на точке #${p.point_id}`;
+    case 'request_new': return `Заявка на ${p.type === 'return' ? 'возврат' : 'списание'}: ${p.sku_name || ''} ×${num(p.qty)} — «${p.point_name || ''}»`;
+    case 'request_decided': return `Заявка на ${p.type === 'return' ? 'возврат' : 'списание'} ${p.sku_name || ''}: ${p.approved ? 'одобрена' : 'отклонена'}`;
     default: return type;
   }
 }
@@ -245,8 +254,10 @@ function renderRoute() {
     shift: viewShift, shifts: viewShifts, analytics: viewAnalytics, kpi: viewKpi,
     movements: viewMovements, skus: viewSkus, users: viewUsers, schedules: viewSchedules, audit: viewAudit,
     // SE cabinet
-    myshift: viewMyShift, arrival: viewArrival, sestock: viewSeStock,
+    myshift: viewMyShift, arrival: viewArrival, writeoff: viewWriteoff, sestock: viewSeStock,
     shifthistory: viewShiftHistory, selogs: viewSeLogs,
+    // BRE/ADMIN approvals
+    approvals: viewApprovals,
   };
   const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
   (routes[App.route] || fallback)(v);
@@ -435,16 +446,16 @@ async function viewMyShift(v) {
           <div class="muted">Смена открыта: <b>${fmtDate(d.shift.opened_at)}</b> · ${esc(d.shift.opened_by_name || '')}</div>
         </div>
         <div class="shift-head-stats">
-          <div><span class="muted">Продано</span><b>${num(t.sales_qty)}</b></div>
-          <div><span class="muted">Сумма продаж</span><b>${money(t.sales_value)}</b></div>
-          <div><span class="muted">Остаток вечером</span><b>${num(t.current)}</b></div>
+          <div><span class="muted">Продано</span><b id="stSold">${num(t.sales_qty)}</b></div>
+          <div><span class="muted">Сумма продаж</span><b id="stValue">${money(t.sales_value)}</b></div>
+          <div><span class="muted">Остаток вечером</span><b id="stCurrent">${num(t.current)}</b></div>
         </div>
       </div>
       ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
       <div class="row" style="margin:18px 0 0"><input class="tbl-search" placeholder="Поиск по SKU…"></div>
       <div class="table-wrap" style="margin-top:12px">
         <table class="shift-table se-shift">
-          <thead><tr><th>SKU</th><th class="num">Утренний остаток</th><th class="num">Продано</th><th class="num">Списание</th><th class="num">Вечерний остаток</th></tr></thead>
+          <thead><tr><th>SKU</th><th class="num">Утренний остаток</th><th class="num">Продано</th><th class="num">Вечерний остаток</th></tr></thead>
           <tbody>${seTableRows(d.lines, true)}</tbody>
         </table>
       </div>`;
@@ -457,46 +468,67 @@ async function viewMyShift(v) {
   App._refresh = load; await load();
 }
 
-// rows for the SE table, grouped by category. editable=true shows inputs.
+// rows for the SE table, grouped by category. editable=true shows продано input.
 function seTableRows(lines, editable) {
   return groupByCategory(lines).map(([cat, items]) => {
-    const head = `<tr class="cat-row"><td colspan="5">${esc(cat)}</td></tr>`;
+    const head = `<tr class="cat-row"><td colspan="4">${esc(cat)}</td></tr>`;
     const rows = items.map((l) => {
+      const adjust = l.adjust || 0;
       const morning = `${num(l.opening)}${l.income > 0 ? ` <span class="inc-plus">+${num(l.income)}</span>` : ''}`;
+      // yellow chip: approved return (+) / writeoff (-)
+      const adjChip = adjust !== 0 ? ` <span class="adj-chip">${adjust > 0 ? '+' : '−'}${num(Math.abs(adjust))}</span>` : '';
       const sold = editable
         ? `<input class="qty-input sold-input" data-sku="${l.sku_id}" type="number" min="0" step="1" value="${l.sales_qty}">`
         : `<b>${num(l.sales_qty)}</b>`;
-      const wo = editable
-        ? `<input class="qty-input wo-input" data-sku="${l.sku_id}" type="number" min="0" step="1" value="${l.writeoff}">`
-        : `<b>${num(l.writeoff)}</b>`;
-      return `<tr data-sku="${l.sku_id}" data-text="${esc((l.name + ' ' + l.article).toLowerCase())}">
-        <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span>
+      return `<tr data-sku="${l.sku_id}" data-text="${esc((l.name + ' ' + l.article).toLowerCase())}"
+            data-opening="${l.opening}" data-income="${l.income}" data-writeoff="${l.writeoff}" data-adjust="${adjust}" data-price="${l.price}">
+        <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span>${adjChip}
           <div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
         <td class="num">${morning}</td>
         <td class="num sold-cell">${sold}</td>
-        <td class="num">${wo}</td>
-        <td class="num"><b>${num(l.current)}</b></td>
+        <td class="num evening-cell"><b>${num(l.current)}</b></td>
       </tr>`;
     }).join('');
     return head + rows;
   }).join('');
 }
 
+// evening for a row from its data + current sold value
+function rowEvening(tr) {
+  const d = tr.dataset;
+  const sold = Number(tr.querySelector('.sold-input') ? tr.querySelector('.sold-input').value : 0) || 0;
+  return Number(d.opening) + Number(d.income) - sold - Number(d.writeoff) + Number(d.adjust);
+}
+
+function recalcSeTotals(root) {
+  let soldQty = 0, soldVal = 0, evening = 0;
+  root.querySelectorAll('tr[data-sku]').forEach((tr) => {
+    const sold = Number(tr.querySelector('.sold-input') ? tr.querySelector('.sold-input').value : 0) || 0;
+    soldQty += sold; soldVal += sold * Number(tr.dataset.price); evening += rowEvening(tr);
+  });
+  const set = (id, val) => { const e = root.ownerDocument.getElementById(id) || document.getElementById(id); if (e) e.textContent = val; };
+  set('stSold', num(soldQty)); set('stValue', money(soldVal)); set('stCurrent', num(evening));
+}
+
 function bindSeTable(root, shiftId) {
-  const wire = (sel, endpoint) => root.querySelectorAll(sel).forEach((inp) => {
+  root.querySelectorAll('.sold-input').forEach((inp) => {
+    const tr = inp.closest('tr');
+    // instant local recalculation (no waiting for the server round-trip)
+    inp.addEventListener('input', () => {
+      const ev = tr.querySelector('.evening-cell'); if (ev) ev.innerHTML = `<b>${num(rowEvening(tr))}</b>`;
+      recalcSeTotals(root);
+    });
     const commit = async () => {
       const qty = Number(inp.value);
       if (isNaN(qty) || qty < 0) return;
       inp.classList.add('saving');
-      try { await api(`/shifts/${shiftId}/${endpoint}`, { method: 'POST', body: { sku_id: Number(inp.dataset.sku), qty } }); }
+      try { await api(`/shifts/${shiftId}/set-sales`, { method: 'POST', body: { sku_id: Number(inp.dataset.sku), qty } }); }
       catch {}
       inp.classList.remove('saving');
     };
     inp.addEventListener('change', commit);
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
   });
-  wire('.sold-input', 'set-sales');
-  wire('.wo-input', 'set-writeoff');
 }
 
 async function openManualShift(point) {
@@ -556,6 +588,92 @@ async function viewArrival(v) {
     } catch {}
   };
   bindTableTools(v, mine.id);
+}
+
+// ---- Списание / возврат (заявки на апрув) ----
+async function viewWriteoff(v) {
+  v.innerHTML = topbar('Списание / возврат');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const mine = await getMyPoint();
+  if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+
+  const statusPillReq = (s) => s === 'approved' ? '<span class="pill open">одобрено</span>'
+    : s === 'rejected' ? '<span class="pill danger">отклонено</span>' : '<span class="pill inv">на согласовании</span>';
+
+  const load = async () => {
+    const [skus, reqs] = await Promise.all([api('/skus'), api(`/requests?point_id=${mine.id}`)]);
+    const groups = groupByCategory(skus);
+    body.innerHTML = `
+      <div class="card" style="max-width:620px">
+        <h3>Новая заявка</h3>
+        <div class="muted" style="margin-bottom:14px">Заявка уходит на согласование BRE точки. После одобрения остаток меняется автоматически
+          и у SKU на «Моя смена» появится жёлтая отметка (+ возврат / − списание).</div>
+        <div class="field"><label>SKU</label><select id="wSku">
+          ${groups.map(([cat, items]) => `<optgroup label="${esc(cat)}">${items.map((s) => `<option value="${s.id}">${esc(s.name)} (${esc(s.article)})</option>`).join('')}</optgroup>`).join('')}
+        </select></div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>Тип</label><select id="wType"><option value="writeoff">Списание</option><option value="return">Возврат</option></select></div>
+          <div class="field" style="flex:1"><label>Количество</label><input id="wQty" type="number" min="1" value="1"></div>
+        </div>
+        <div class="field"><label>Комментарий (необязательно)</label><input id="wComment" placeholder="например: брак, возврат покупателя"></div>
+        <div class="row" style="justify-content:flex-end"><button class="btn" id="wSend">Отправить на согласование</button></div>
+      </div>
+      <div class="section-title">Мои заявки</div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Дата</th><th>SKU</th><th>Тип</th><th class="num">Кол-во</th><th>Статус</th><th>Кто решил</th><th>Комментарий</th></tr></thead>
+        <tbody>${reqs.length ? reqs.map((r) => `<tr>
+          <td>${fmtDate(r.created_at)}</td><td>${esc(r.sku_name)}</td>
+          <td>${r.type === 'return' ? 'Возврат' : 'Списание'}</td><td class="num">${num(r.qty)}</td>
+          <td>${statusPillReq(r.status)}</td><td>${esc(r.decided_by_name || '—')}</td><td><span class="muted">${esc(r.comment || '')}</span></td>
+        </tr>`).join('') : '<tr><td colspan="7" class="empty">Заявок пока нет.</td></tr>'}</tbody></table>
+      </div>`;
+    $('#wSend', v).onclick = async () => {
+      const sku_id = Number($('#wSku', v).value);
+      const type = $('#wType', v).value;
+      const qty = Number($('#wQty', v).value);
+      if (!qty || qty <= 0) return toast('Укажите количество', 'warn');
+      try {
+        await api('/requests', { method: 'POST', body: { sku_id, type, qty, comment: $('#wComment', v).value } });
+        toast('Заявка отправлена на согласование', 'ok'); load();
+      } catch {}
+    };
+  };
+  App._refresh = load; await load();
+}
+
+// ---- Заявки на согласование (BRE/ADMIN) ----
+async function viewApprovals(v) {
+  v.innerHTML = topbar('Заявки на согласование');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const load = async () => {
+    const reqs = await api('/requests');
+    const pending = reqs.filter((r) => r.status === 'pending');
+    const decided = reqs.filter((r) => r.status !== 'pending').slice(0, 50);
+    body.innerHTML = `
+      <div class="section-title">Ожидают решения (${pending.length})</div>
+      ${pending.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Дата</th><th>Точка</th><th>SKU</th><th>Тип</th><th class="num">Кол-во</th><th>Кто</th><th>Комментарий</th><th></th></tr></thead>
+        <tbody>${pending.map((r) => `<tr>
+          <td>${fmtDate(r.created_at)}</td><td>${esc(r.point_name)}</td><td>${esc(r.sku_name)}</td>
+          <td>${r.type === 'return' ? 'Возврат' : 'Списание'}</td><td class="num">${num(r.qty)}</td>
+          <td>${esc(r.requested_by_name || '—')}</td><td><span class="muted">${esc(r.comment || '')}</span></td>
+          <td class="num"><button class="btn sm" data-ok="${r.id}">Одобрить</button>
+            <button class="btn danger sm" data-no="${r.id}">Отклонить</button></td>
+        </tr>`).join('')}</tbody></table></div>` : '<div class="empty">Нет заявок на согласовании.</div>'}
+      <div class="section-title">История решений</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Дата</th><th>Точка</th><th>SKU</th><th>Тип</th><th class="num">Кол-во</th><th>Статус</th><th>Решил</th></tr></thead>
+        <tbody>${decided.length ? decided.map((r) => `<tr>
+          <td>${fmtDate(r.decided_at || r.created_at)}</td><td>${esc(r.point_name)}</td><td>${esc(r.sku_name)}</td>
+          <td>${r.type === 'return' ? 'Возврат' : 'Списание'}</td><td class="num">${num(r.qty)}</td>
+          <td>${r.status === 'approved' ? '<span class="pill open">одобрено</span>' : '<span class="pill danger">отклонено</span>'}</td>
+          <td>${esc(r.decided_by_name || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">Пока нет.</td></tr>'}</tbody></table></div>`;
+    body.querySelectorAll('[data-ok]').forEach((b) => b.onclick = async () => { try { await api(`/requests/${b.dataset.ok}/approve`, { method: 'POST' }); toast('Заявка одобрена', 'ok'); load(); } catch {} });
+    body.querySelectorAll('[data-no]').forEach((b) => b.onclick = async () => { try { await api(`/requests/${b.dataset.no}/reject`, { method: 'POST' }); toast('Заявка отклонена', 'ok'); load(); } catch {} });
+  };
+  App._refresh = load; await load();
 }
 
 // ---- Запасы в точке (прогноз) ----

@@ -6,8 +6,9 @@ function today() {
 }
 
 // current stock for a shift_stock row
+// adjust = net effect of approved writeoff(-)/return(+) requests
 function currentStock(row) {
-  return (row.opening || 0) + (row.income || 0) - (row.sales_qty || 0) - (row.writeoff || 0);
+  return (row.opening || 0) + (row.income || 0) - (row.sales_qty || 0) - (row.writeoff || 0) + (row.adjust || 0);
 }
 
 function audit({ userId, action, entity, oldValue, newValue, ip }) {

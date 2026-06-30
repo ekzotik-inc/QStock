@@ -61,17 +61,39 @@ async function loginAs(page, login, password) {
 
     // grouped table with the requested columns + category rows
     const headers = (await page.$$eval('.se-shift thead th', (e) => e.map((x) => x.innerText))).join('|');
-    check('UI-SE-TABLE-COLUMNS', /УТРЕННИЙ/.test(headers) && /ПРОДАНО/.test(headers) && /ВЕЧЕРНИЙ/.test(headers), headers);
+    check('UI-SE-TABLE-COLUMNS', /УТРЕННИЙ/.test(headers) && /ПРОДАНО/.test(headers) && /ВЕЧЕРНИЙ/.test(headers) && !/СПИСАНИЕ/.test(headers), headers);
     check('UI-SE-CATEGORIES', (await page.$$('.se-shift .cat-row')).length >= 1, 'SKU grouped by category');
 
     if (boardVisible) {
       // enter продано → evening cell must update live
-      const eveningOf = () => page.$$eval('.se-shift tbody tr[data-sku]', (trs) => trs[0].querySelectorAll('td')[4].innerText.trim());
+      const eveningOf = () => page.$$eval('.se-shift tbody tr[data-sku]', (trs) => trs[0].querySelectorAll('td')[3].innerText.trim());
       const before = await eveningOf();
-      const sold = await page.$$('.sold-input'); await sold[0].fill('7'); await sold[0].press('Enter');
+      const sold = await page.$$('.sold-input'); await sold[0].fill('7');
+      // instant local recalc (no network wait)
+      const instant = await eveningOf();
+      check('UI-SE-INSTANT', instant !== before, `evening updated instantly ${before} -> ${instant}`);
+      await sold[0].press('Enter');
       await page.waitForTimeout(900);
       const after = await eveningOf();
-      check('UI-SE-SALE-LIVE', before !== after, `evening ${before} -> ${after} after продано=7`);
+      check('UI-SE-SALE-LIVE', after === instant, `evening persisted ${after}`);
+
+      // Списание/возврат: submit a request, it appears in "Мои заявки"
+      await page.click('.nav a[data-route="writeoff"]'); await page.waitForTimeout(500);
+      check('UI-SE-WRITEOFF-FORM', await page.isVisible('#wSend'), 'writeoff/return request form visible');
+      await page.fill('#wQty', '2'); await page.click('#wSend'); await page.waitForTimeout(700);
+      check('UI-SE-WRITEOFF-REQ', await page.isVisible('.pill.inv'), 'request shows as pending');
+
+      // BRE approves while the shift is open
+      const brePage = await (await browser.newContext()).newPage();
+      await loginAs(brePage, 'bre', 'bre123');
+      await brePage.click('.nav a[data-route="approvals"]'); await brePage.waitForTimeout(600);
+      check('UI-BRE-APPROVALS', await brePage.isVisible('[data-ok]'), 'BRE sees pending request');
+      if (await brePage.isVisible('[data-ok]')) { await brePage.click('[data-ok]'); await brePage.waitForTimeout(700); }
+      await brePage.close();
+
+      // back to Моя смена — approved writeoff shows a yellow chip near the SKU
+      await page.click('.nav a[data-route="myshift"]'); await page.waitForTimeout(700);
+      check('UI-SE-ADJ-CHIP', await page.isVisible('.adj-chip'), 'yellow +/- chip after approval');
 
       // Новое поступление adds income shown as green +N on Моя смена
       await page.click('.nav a[data-route="arrival"]'); await page.waitForTimeout(500);
@@ -116,6 +138,10 @@ async function loginAs(page, login, password) {
     // currency must be in сўм on the dashboard (which shows money)
     const dashText = await page2.innerText('body');
     check('UI-CURRENCY', dashText.includes('сўм') && !dashText.includes('₽'), 'dashboard currency in сўм, no ₽');
+
+    // approvals inbox renders (request already approved by BRE earlier)
+    await page2.click('.nav a[data-route="approvals"]'); await page2.waitForTimeout(600);
+    check('UI-ADM-APPROVALS', await page2.isVisible('.section-title'), 'approvals inbox renders');
 
     await page2.click('.nav a[data-route="points"]');
     await page2.waitForTimeout(600);

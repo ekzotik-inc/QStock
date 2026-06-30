@@ -188,6 +188,8 @@ td { color: var(--ink-2); }
 .se-shift .cat-row td { background: var(--surface-2); color: var(--ink-2); font-weight: 800; font-size: 11px;
   text-transform: uppercase; letter-spacing: .06em; padding: 10px 18px; }
 .inc-plus { color: var(--ok); font-weight: 700; margin-left: 5px; }
+.adj-chip { display: inline-block; margin-left: 6px; background: var(--warn-weak); color: var(--warn);
+  font-weight: 800; font-size: 12px; padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; }
 .reorder-pill { display: inline-block; background: var(--accent-weak); color: var(--accent-ink); font-weight: 800;
   padding: 3px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; }
 .se-shift tr.reorder-now td { background: var(--warn-weak); }

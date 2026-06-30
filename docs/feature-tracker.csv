@@ -96,3 +96,8 @@ SE-13,SE Cabinet,SE,Writeoff/порча column in Моя смена,POST /shifts
 SE-14,SE Cabinet,SE,Export order request and shift report to Excel/CSV,GET point-stock-forecast/:id/export.csv and shifts/:id/export.csv,Verified,PASS,
 SE-15,SE Cabinet,SE,Search by SKU and collapsible categories in SE tables,bindTableTools: search + collapse,Verified,PASS,
 SE-16,SE Cabinet,SE,Click a SKU to view its movement history,openSkuMovements modal via /movements,Verified,PASS,
+SE-17,SE Cabinet,SE,Evening stock recalculates instantly on продано input,client-side rowEvening on input event; no server wait,Verified,PASS,
+SE-18,SE Cabinet,SE,Списание removed from Моя смена main table,seTableRows has 4 columns,Verified,PASS,
+SE-19,SE Cabinet,SE,Списание/возврат tab sends approval request to BRE,POST /requests pending; notify point BRE+admins,Verified,PASS,
+REQ-01,Requests,BRE/ADMIN,BRE approves/rejects stock requests for own points,POST /requests/:id/approve|reject; applies adjust to open shift,Verified,PASS,
+REQ-02,Requests,SE,Approved writeoff/return shows yellow +/- chip near SKU,shift_stock.adjust; adj-chip on Моя смена,Verified,PASS,
