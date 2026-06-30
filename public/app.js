@@ -503,22 +503,28 @@ async function viewSeStock(v) {
     <div class="filters">
       <div class="field"><label>Анализировать продажи за (дней)</label><input id="fDays" type="number" min="1" max="90" value="7"></div>
       <div class="field"><label>Прогноз запаса на (дней)</label><input id="fHor" type="number" min="1" max="90" value="7"></div>
+      <div class="field"><label>Страховой запас (%)</label><input id="fSafe" type="number" min="0" max="200" value="20"></div>
+      <div class="field"><label>Срок поставки (дней)</label><input id="fLead" type="number" min="0" max="90" value="2"></div>
       <button class="btn sm" id="fCalc">Рассчитать</button>
     </div>
-    <div class="muted" style="margin-bottom:16px">Средние продажи в день рассчитываются по фактическим продажам за выбранный период.
-      Рекомендуемый запас = средние продажи × дни прогноза. «Заказать» = рекомендуемый запас − текущий остаток.</div>
+    <div class="muted" style="margin-bottom:16px">Средние продажи считаются только по дням, когда точка работала.
+      Рекомендуемый запас = средние × (дни прогноза + срок поставки) × (1 + страховой запас).
+      «Заказать» = рекомендуемый запас − текущий остаток. Подсветка — пора заказывать с учётом срока поставки.</div>
     <div id="forecastOut"></div>`;
 
   const load = async () => {
     const days = Number($('#fDays', v).value) || 7;
     const horizon = Number($('#fHor', v).value) || 7;
-    const d = await api(`/point-stock-forecast/${mine.id}?days=${days}&horizon=${horizon}`);
+    const safety = Number($('#fSafe', v).value) || 0;
+    const lead = Number($('#fLead', v).value) || 0;
+    const d = await api(`/point-stock-forecast/${mine.id}?days=${days}&horizon=${horizon}&safety=${safety}&lead=${lead}`);
     const out = $('#forecastOut', v);
     const totalReorder = d.rows.reduce((a, r) => a + r.reorder, 0);
     out.innerHTML = `
       <div class="kpis">
-        ${kpi('Период анализа', d.days + ' дн.')}
-        ${kpi('Прогноз на', d.horizon + ' дн.')}
+        ${kpi('Рабочих дней в периоде', d.worked_days + ' / ' + d.days)}
+        ${kpi('Прогноз + поставка', (d.horizon + d.lead) + ' дн.')}
+        ${kpi('Страховой запас', d.safety + '%')}
         ${kpi('Позиций к заказу', d.rows.filter((r) => r.reorder > 0).length)}
         ${kpi('Всего заказать (шт)', num(totalReorder), true)}
       </div>
@@ -535,12 +541,12 @@ async function viewSeStock(v) {
           </tr></thead>
           <tbody>${groupByCategory(d.rows).map(([cat, items]) => `
             <tr class="cat-row"><td colspan="7">${esc(cat)}</td></tr>
-            ${items.map((r) => `<tr data-sku="${r.sku_id}">
+            ${items.map((r) => `<tr data-sku="${r.sku_id}" class="${r.reorder_now && r.reorder > 0 ? 'reorder-now' : ''}">
               <td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(r.article)}</div></td>
               <td class="num">${num(r.sold)}</td>
               <td class="num">${num(r.per_day)}</td>
               <td class="num">${num(r.current)}</td>
-              <td class="num">${r.days_left == null ? '—' : r.days_left + ' дн.'}</td>
+              <td class="num">${r.days_left == null ? '—' : r.days_left + ' дн.'}${r.reorder_now && r.reorder > 0 ? ' <span class="pill inv">пора</span>' : ''}</td>
               <td class="num">${num(r.recommended)}</td>
               <td class="num">${r.reorder > 0 ? `<span class="reorder-pill">+${num(r.reorder)}</span>` : '<span class="muted">—</span>'}</td>
             </tr>`).join('')}`).join('')}</tbody>

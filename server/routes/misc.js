@@ -52,6 +52,8 @@ router.get('/point-stock-forecast/:pointId', authRequired, (req, res) => {
 
   const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
   const horizon = Math.min(Math.max(Number(req.query.horizon) || 7, 1), 90);
+  const safety = Math.min(Math.max(Number(req.query.safety) || 0, 0), 200); // % страховой запас
+  const lead = Math.min(Math.max(Number(req.query.lead) || 0, 0), 90);      // срок поставки, дней
 
   // net sold per SKU over the window (negative correction deltas included)
   const soldRows = db.prepare(
@@ -61,6 +63,14 @@ router.get('/point-stock-forecast/:pointId', authRequired, (req, res) => {
      GROUP BY sa.sku_id`
   ).all(pid, `-${days} days`);
   const soldBy = new Map(soldRows.map((r) => [r.sku_id, r.sold]));
+
+  // count days the point actually worked in the window (distinct business dates
+  // with a shift) — dividing by these gives a truer average than calendar days
+  const workedDays = db.prepare(
+    `SELECT COUNT(DISTINCT business_date) AS c FROM shifts
+     WHERE point_id = ? AND business_date >= date('now', ?)`
+  ).get(pid, `-${days} days`).c || 0;
+  const denom = workedDays > 0 ? workedDays : 0;
 
   // current stock per SKU: take the latest shift (open or most recent closed)
   const latest = db.prepare('SELECT id FROM shifts WHERE point_id=? ORDER BY id DESC LIMIT 1').get(pid);
@@ -74,18 +84,21 @@ router.get('/point-stock-forecast/:pointId', authRequired, (req, res) => {
   const skus = db.prepare('SELECT * FROM skus WHERE active = 1 ORDER BY category, name').all();
   const rows = skus.map((s) => {
     const sold = soldBy.get(s.id) || 0;
-    const perDay = sold / days;
+    const perDay = denom > 0 ? sold / denom : 0;
     const current = curBy.get(s.id) || 0;
-    const recommended = Math.ceil(perDay * horizon);
+    // cover the forecast horizon plus the supplier lead time, plus a safety buffer
+    const recommended = Math.ceil(perDay * (horizon + lead) * (1 + safety / 100));
     const reorder = Math.max(0, recommended - current);
     const daysLeft = perDay > 0 ? Math.floor(current / perDay) : null; // на сколько дней хватит
+    // подсказка: пора заказывать, если остатка хватит только на срок поставки
+    const reorderNow = perDay > 0 && lead > 0 ? current <= perDay * lead : reorder > 0;
     return {
       sku_id: s.id, name: s.name, article: s.article, category: s.category,
       sold, per_day: Math.round(perDay * 100) / 100, current,
-      recommended, reorder, days_left: daysLeft,
+      recommended, reorder, days_left: daysLeft, reorder_now: reorderNow,
     };
   });
-  res.json({ days, horizon, rows });
+  res.json({ days, horizon, safety, lead, worked_days: workedDays, rows });
 });
 
 // SKU movement history (scoped by role)

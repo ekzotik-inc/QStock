@@ -190,6 +190,7 @@ td { color: var(--ink-2); }
 .inc-plus { color: var(--ok); font-weight: 700; margin-left: 5px; }
 .reorder-pill { display: inline-block; background: var(--accent-weak); color: var(--accent-ink); font-weight: 800;
   padding: 3px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.se-shift tr.reorder-now td { background: var(--warn-weak); }
 .sold-input { width: 88px; text-align: right; transition: border-color .2s var(--ease), box-shadow .2s var(--ease); }
 .sold-input.saving { border-color: var(--accent); box-shadow: var(--ring); }
 .qty-input { width: 64px; padding: 9px; border: 1px solid var(--line-strong); border-radius: 10px; text-align: center;
