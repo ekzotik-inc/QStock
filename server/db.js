@@ -1,13 +1,29 @@
 'use strict';
 const path = require('path');
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite'); // built-in, no native build step
 
 const DB_PATH = process.env.QSTOCK_DB || path.join(__dirname, '..', 'data', 'qstock.db');
 require('fs').mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA foreign_keys = ON');
+
+// better-sqlite3-compatible transaction helper: returns a function that runs
+// `fn` inside BEGIN/COMMIT, rolling back on error and returning fn's result.
+db.transaction = function (fn) {
+  return (...args) => {
+    db.exec('BEGIN');
+    try {
+      const result = fn(...args);
+      db.exec('COMMIT');
+      return result;
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  };
+};
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (

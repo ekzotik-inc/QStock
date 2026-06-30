@@ -6,13 +6,16 @@
 ## Стек
 
 - **Backend:** Node.js + Express
-- **БД:** SQLite (`better-sqlite3`), полная история операций
+- **БД:** SQLite через встроенный модуль `node:sqlite` (без нативной сборки), полная история операций
 - **Realtime:** Socket.IO (онлайн-обновление без перезагрузки)
 - **Auth:** JWT (cookie) + bcrypt, ролевая модель
 - **Frontend:** SPA на vanilla JS, светлая минималистичная тема в стиле IQOS,
   адаптивная вёрстка (ПК и планшеты)
 
 ## Запуск
+
+Требуется **Node.js 22.5+ или 24** (используется встроенный `node:sqlite`,
+компилятор C++ / Visual Studio Build Tools не нужны).
 
 ```bash
 npm install
