@@ -82,10 +82,12 @@ function handleRealtime(ev, data) {
   }
   if (App.route === 'points' && (ev === 'point:changed' || ev === 'shift:changed')) { if (App._refresh) App._refresh(); }
   if (ev === 'sku:changed' && App.route === 'skus') { if (App._refresh) App._refresh(); }
-  // SE "Моя смена" — live update on sales/stock/shift changes (skip while user is typing)
+  // SE "Моя смена" — live update on sales/stock/shift changes; skip while the SE
+  // is editing or just edited (their own change is already reflected locally)
   if (App.route === 'myshift' && App._refresh) {
     const typing = document.activeElement && document.activeElement.classList.contains('sold-input');
-    if (!typing) App._refresh();
+    const justEdited = App.state.lastSeInput && (Date.now() - App.state.lastSeInput < 2000);
+    if (!typing && !justEdited) App._refresh();
   }
 }
 
@@ -478,14 +480,18 @@ function seTableRows(lines, editable) {
       // yellow chip: approved return (+) / writeoff (-)
       const adjChip = adjust !== 0 ? ` <span class="adj-chip">${adjust > 0 ? '+' : '−'}${num(Math.abs(adjust))}</span>` : '';
       const sold = editable
-        ? `<input class="qty-input sold-input" data-sku="${l.sku_id}" type="number" min="0" step="1" value="${l.sales_qty}">`
+        ? `<div class="stepper">
+             <button type="button" class="step-btn" data-step="-1" tabindex="-1">−</button>
+             <input class="sold-input" data-sku="${l.sku_id}" type="number" inputmode="numeric" min="0" step="1" value="${l.sales_qty}">
+             <button type="button" class="step-btn" data-step="1" tabindex="-1">+</button>
+           </div>`
         : `<b>${num(l.sales_qty)}</b>`;
       return `<tr data-sku="${l.sku_id}" data-text="${esc((l.name + ' ' + l.article).toLowerCase())}"
             data-opening="${l.opening}" data-income="${l.income}" data-writeoff="${l.writeoff}" data-adjust="${adjust}" data-price="${l.price}">
         <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span>${adjChip}
-          <div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
+          <div class="muted" style="font-size:12px">${money(l.price)}</div></td>
         <td class="num">${morning}</td>
-        <td class="num sold-cell">${sold}</td>
+        <td class="sold-cell">${sold}</td>
         <td class="num evening-cell"><b>${num(l.current)}</b></td>
       </tr>`;
     }).join('');
@@ -513,21 +519,33 @@ function recalcSeTotals(root) {
 function bindSeTable(root, shiftId) {
   root.querySelectorAll('.sold-input').forEach((inp) => {
     const tr = inp.closest('tr');
-    // instant local recalculation (no waiting for the server round-trip)
-    inp.addEventListener('input', () => {
+    const cell = inp.closest('.stepper') || inp;
+    let timer;
+    const recalc = () => {
       const ev = tr.querySelector('.evening-cell'); if (ev) ev.innerHTML = `<b>${num(rowEvening(tr))}</b>`;
       recalcSeTotals(root);
-    });
+      App.state.lastSeInput = Date.now(); // suppress self-triggered live refresh
+    };
     const commit = async () => {
+      clearTimeout(timer);
       const qty = Number(inp.value);
       if (isNaN(qty) || qty < 0) return;
-      inp.classList.add('saving');
+      cell.classList.add('saving');
       try { await api(`/shifts/${shiftId}/set-sales`, { method: 'POST', body: { sku_id: Number(inp.dataset.sku), qty } }); }
       catch {}
-      inp.classList.remove('saving');
+      cell.classList.remove('saving');
     };
-    inp.addEventListener('change', commit);
+    const scheduleSave = () => { clearTimeout(timer); timer = setTimeout(commit, 450); };
+    inp.addEventListener('input', () => { recalc(); scheduleSave(); });
+    inp.addEventListener('change', commit);            // immediate on blur/Enter
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    inp.addEventListener('focus', () => inp.select());
+    // −/+ stepper buttons: update locally + debounced save (no flicker)
+    const stepper = inp.closest('.stepper');
+    if (stepper) stepper.querySelectorAll('.step-btn').forEach((btn) => btn.addEventListener('click', () => {
+      inp.value = Math.max(0, (Number(inp.value) || 0) + Number(btn.dataset.step));
+      recalc(); scheduleSave();
+    }));
   });
 }
 
@@ -568,8 +586,7 @@ async function viewArrival(v) {
         <tbody>${groupByCategory(d.lines).map(([cat, items]) => `
           <tr class="cat-row"><td colspan="3">${esc(cat)}</td></tr>
           ${items.map((l) => `<tr data-sku="${l.sku_id}" data-text="${esc((l.name + ' ' + l.article).toLowerCase())}">
-            <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span>
-              <div class="muted" style="font-size:12px">${esc(l.article)}</div></td>
+            <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span></td>
             <td class="num">${num(l.current)}</td>
             <td class="num"><input class="qty-input arr-input" data-sku="${l.sku_id}" type="number" min="0" value="0"></td>
           </tr>`).join('')}`).join('')}</tbody>
@@ -610,7 +627,7 @@ async function viewWriteoff(v) {
         <div class="muted" style="margin-bottom:14px">Заявка уходит на согласование BRE точки. После одобрения остаток меняется автоматически
           и у SKU на «Моя смена» появится жёлтая отметка (+ возврат / − списание).</div>
         <div class="field"><label>SKU</label><select id="wSku">
-          ${groups.map(([cat, items]) => `<optgroup label="${esc(cat)}">${items.map((s) => `<option value="${s.id}">${esc(s.name)} (${esc(s.article)})</option>`).join('')}</optgroup>`).join('')}
+          ${groups.map(([cat, items]) => `<optgroup label="${esc(cat)}">${items.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>`).join('')}
         </select></div>
         <div class="row">
           <div class="field" style="flex:1"><label>Тип</label><select id="wType"><option value="writeoff">Списание</option><option value="return">Возврат</option></select></div>
@@ -728,7 +745,7 @@ async function viewSeStock(v) {
             <tr class="cat-row"><td colspan="9">${esc(cat)}</td></tr>
             ${items.map((r) => `<tr data-sku="${r.sku_id}" data-text="${esc((r.name + ' ' + r.article).toLowerCase())}" class="${r.reorder_now && r.reorder > 0 ? 'reorder-now' : ''}">
               <td><span class="sku-link" data-skuview="${r.sku_id}" data-name="${esc(r.name)}"><b>${esc(r.name)}</b></span>
-                <div class="muted" style="font-size:12px">${esc(r.article)}${r.custom_logistics ? ' · своя логистика' : ''}</div></td>
+                ${r.custom_logistics ? '<div class="muted" style="font-size:12px">своя логистика</div>' : ''}</td>
               <td class="num">${num(r.sold)}</td>
               <td class="num">${num(r.per_day)}</td>
               <td class="num">${num(r.current)}</td>
