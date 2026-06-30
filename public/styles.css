@@ -318,7 +318,10 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 .note-card.is-closed .note-text { text-decoration: line-through; text-decoration-color: var(--line-strong); }
 .note-text { font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: var(--ink); }
 .note-foot { font-size: 12px; gap: 8px; }
-.note-foot .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-grid .note-foot { flex-direction: column; align-items: stretch; gap: 8px; }
+.notes-grid .note-foot > .muted { white-space: normal; }
+.notes-grid .note-foot > .row { justify-content: space-between; }
+.note-foot .muted { overflow: hidden; text-overflow: ellipsis; }
 
 /* compact list rows */
 .notes-list .note-card { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 14px; }
@@ -351,6 +354,30 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 .note-card.pop { animation: notePop .45s cubic-bezier(.34, 1.56, .64, 1) both; }
 .note-card.leaving { opacity: 0; transform: scale(.92) translateY(-6px); }
 .notes-grid .note-card, .notes-list .note-card { animation: fadeIn .3s var(--ease) both; }
+
+/* employee name highlight (IQOS turquoise, premium) */
+.emp { color: var(--mint); font-weight: 700; letter-spacing: .1px; }
+
+/* modern segmented control */
+.segmented { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
+.segmented .seg-opt { border: none; background: transparent; color: var(--ink-soft); padding: 7px 14px;
+  border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background .18s var(--ease), color .18s var(--ease), transform .1s var(--ease); }
+.segmented .seg-opt:hover { color: var(--ink); }
+.segmented .seg-opt:active { transform: scale(.94); }
+.segmented .seg-opt.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+.segmented.sm .seg-opt { padding: 5px 11px; font-size: 12px; }
+.segmented .seg-opt.imp-high.on { background: var(--danger); color: #fff; }
+.segmented .seg-opt.imp-normal.on { background: var(--accent); color: var(--accent-contrast); }
+.segmented .seg-opt.imp-low.on { background: var(--ink-soft); color: #fff; }
+.segmented .seg-opt.status-open.on { background: var(--ok); color: #fff; }
+.segmented .seg-opt.status-pending.on { background: var(--warn); color: #fff; }
+.segmented .seg-opt.status-closed.on { background: var(--ink-soft); color: #fff; }
+.seg-fields { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.seg-field { display: flex; align-items: center; gap: 8px; }
+.seg-label { font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+.imp-pill[data-imp] { cursor: pointer; }
+.imp-pill[data-imp]:hover { filter: brightness(.96); }
 
 .empty { text-align: center; color: var(--ink-soft); padding: 48px; font-size: 14px; }
 .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); font-weight: 700; margin: 30px 0 14px; }

@@ -106,3 +106,6 @@ UX-07,UX,All,Laptop keyboard nav — Enter moves to next field in tables/modals,
 UX-08,UX,SE,Продано shows 0 as a placeholder hint (empty value),placeholder=0 ghost; stepper keeps empty at 0,Verified,PASS,
 UX-09,UX,SE,Notes: Enter sends, Shift+Enter newline,composer keydown,Verified,PASS,
 UX-10,UX,All,Modals submit primary action on Enter,modal Enter handler clicks primary button,Verified,PASS,
+SE-21,SE Cabinet,SE,Notes importance/status as modern segmented controls,segmented() control; click to set; card status inline; importance pill cycles,Verified,PASS,2026 style
+UX-11,UX,All,Employee names highlighted in IQOS turquoise everywhere,emp() helper + .emp style across SE/admin/BRE views and sidebar,Verified,PASS,
+DEMO-01,Demo,All,Compass demo point with 14 days of data,bootstrap seedDemoCompass: 4 SE (2/2), shifts/movements/sales/requests/notes,Verified,PASS,nikita/georgiy/anna/milana

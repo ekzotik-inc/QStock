@@ -16,6 +16,8 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 const money = (n) => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' сум';
 const num = (n) => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 const fmtDate = (s) => s ? new Date(s.replace(' ', 'T') + (s.includes('Z') ? '' : 'Z')).toLocaleString('ru-RU') : '—';
+// highlight an employee name in IQOS turquoise everywhere
+const emp = (name) => `<span class="emp">${esc(name || '—')}</span>`;
 
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
@@ -178,7 +180,7 @@ function renderShell() {
         <div class="me">
           <div class="avatar">${esc(initials(App.user.full_name))}</div>
           <div style="flex:1;min-width:0">
-            <div class="who">${esc(App.user.full_name)}</div>
+            <div class="who">${emp(App.user.full_name)}</div>
             <div class="role">${roleLabel(App.user.role)}</div>
           </div>
           <button class="btn ghost sm" id="logoutBtn" title="Выйти">${ICON.logout}</button>
@@ -323,7 +325,7 @@ async function viewDashboard(v) {
       <div class="section-title">Торговые точки</div>
       <div class="card" style="padding:0;overflow:auto">
         <table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
-        <tbody>${d.table.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.bre_name || '—')}</td><td>${esc(r.se.join(', ') || '—')}</td>
+        <tbody>${d.table.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td>
           <td>${statusPill(r.shift_status)}</td><td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td>
           <td class="num">${money(r.stock_value)}</td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
       </div>
@@ -415,7 +417,7 @@ async function openSkuMovements(skuId, name, pointId) {
     ${rows.length ? `<div class="table-wrap" style="box-shadow:none"><table>
       <thead><tr><th>Время</th><th>Операция</th><th class="num">Кол-во</th><th class="num">Остаток</th><th>Сотрудник</th></tr></thead>
       <tbody>${rows.map((m) => `<tr><td>${fmtDate(m.created_at)}</td><td>${opLabel[m.type] || m.type}</td>
-        <td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${esc(m.user_name || '—')}</td></tr>`).join('')}</tbody>
+        <td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${emp(m.user_name)}</td></tr>`).join('')}</tbody>
     </table></div>` : '<div class="empty">Движений пока нет.</div>'}
     <div class="foot"><button class="btn secondary" onclick="closeModal()">Закрыть</button></div>`);
 }
@@ -473,7 +475,7 @@ async function viewMyShift(v) {
       <div class="card shift-head">
         <div class="shift-head-main">
           <div class="shift-head-name">${esc(d.shift.point_name)}</div>
-          <div class="muted">Смена открыта: <b>${fmtDate(d.shift.opened_at)}</b> · ${esc(d.shift.opened_by_name || '')}</div>
+          <div class="muted">Смена открыта: <b>${fmtDate(d.shift.opened_at)}</b> · ${emp(d.shift.opened_by_name)}</div>
         </div>
         <div class="shift-head-stats">
           <div><span class="muted">Продано</span><b id="stSold">${num(t.sales_qty)}</b></div>
@@ -675,7 +677,7 @@ async function viewWriteoff(v) {
         <tbody>${reqs.length ? reqs.map((r) => `<tr>
           <td>${fmtDate(r.created_at)}</td><td>${esc(r.sku_name)}</td>
           <td>${r.type === 'return' ? 'Возврат' : 'Списание'}</td><td class="num">${num(r.qty)}</td>
-          <td>${statusPillReq(r.status)}</td><td>${esc(r.decided_by_name || '—')}</td><td><span class="muted">${esc(r.comment || '')}</span></td>
+          <td>${statusPillReq(r.status)}</td><td>${emp(r.decided_by_name)}</td><td><span class="muted">${esc(r.comment || '')}</span></td>
         </tr>`).join('') : '<tr><td colspan="7" class="empty">Заявок пока нет.</td></tr>'}</tbody></table>
       </div>`;
     $('#wSend', v).onclick = async () => {
@@ -708,7 +710,7 @@ async function viewApprovals(v) {
         <tbody>${pending.map((r) => `<tr>
           <td>${fmtDate(r.created_at)}</td><td>${esc(r.point_name)}</td><td>${esc(r.sku_name)}</td>
           <td>${r.type === 'return' ? 'Возврат' : 'Списание'}</td><td class="num">${num(r.qty)}</td>
-          <td>${esc(r.requested_by_name || '—')}</td><td><span class="muted">${esc(r.comment || '')}</span></td>
+          <td>${emp(r.requested_by_name)}</td><td><span class="muted">${esc(r.comment || '')}</span></td>
           <td class="num"><button class="btn sm" data-ok="${r.id}">Одобрить</button>
             <button class="btn danger sm" data-no="${r.id}">Отклонить</button></td>
         </tr>`).join('')}</tbody></table></div>` : '<div class="empty">Нет заявок на согласовании.</div>'}
@@ -719,7 +721,7 @@ async function viewApprovals(v) {
           <td>${fmtDate(r.decided_at || r.created_at)}</td><td>${esc(r.point_name)}</td><td>${esc(r.sku_name)}</td>
           <td>${r.type === 'return' ? 'Возврат' : 'Списание'}</td><td class="num">${num(r.qty)}</td>
           <td>${r.status === 'approved' ? '<span class="pill open">одобрено</span>' : '<span class="pill danger">отклонено</span>'}</td>
-          <td>${esc(r.decided_by_name || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">Пока нет.</td></tr>'}</tbody></table></div>`;
+          <td>${emp(r.decided_by_name)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">Пока нет.</td></tr>'}</tbody></table></div>`;
     body.querySelectorAll('[data-ok]').forEach((b) => b.onclick = async () => { try { await api(`/requests/${b.dataset.ok}/approve`, { method: 'POST' }); toast('Заявка одобрена', 'ok'); load(); } catch {} });
     body.querySelectorAll('[data-no]').forEach((b) => b.onclick = async () => { try { await api(`/requests/${b.dataset.no}/reject`, { method: 'POST' }); toast('Заявка отклонена', 'ok'); load(); } catch {} });
   };
@@ -818,8 +820,8 @@ async function viewShiftHistory(v) {
   body.innerHTML = `<div class="table-wrap"><table>
     <thead><tr><th>Дата</th><th>Открыта</th><th>Кем открыта</th><th>Закрыта</th><th>Кем закрыта</th><th></th></tr></thead>
     <tbody>${rows.map((s) => `<tr>
-      <td><b>${s.business_date}</b></td><td>${fmtDate(s.opened_at)}</td><td>${esc(s.opened_by_name || '—')}</td>
-      <td>${s.closed_at ? fmtDate(s.closed_at) : '—'}</td><td>${esc(s.closed_by_name || '—')}</td>
+      <td><b>${s.business_date}</b></td><td>${fmtDate(s.opened_at)}</td><td>${emp(s.opened_by_name)}</td>
+      <td>${s.closed_at ? fmtDate(s.closed_at) : '—'}</td><td>${emp(s.closed_by_name)}</td>
       <td class="num"><button class="btn ghost sm" data-view="${s.id}">Просмотр</button></td></tr>`).join('')}</tbody>
   </table></div>`;
   body.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => {
@@ -839,15 +841,29 @@ async function viewSeLogs(v) {
   body.innerHTML = `<div class="table-wrap"><table>
     <thead><tr><th>Время</th><th>Сотрудник</th><th>Действие</th><th>SKU</th><th class="num">Кол-во</th><th class="num">Остаток</th></tr></thead>
     <tbody>${logs.map((l) => `<tr>
-      <td>${fmtDate(l.created_at)}</td><td>${esc(l.user_name)}</td><td>${esc(l.action)}</td>
+      <td>${fmtDate(l.created_at)}</td><td>${emp(l.user_name)}</td><td>${esc(l.action)}</td>
       <td>${esc(l.sku_name || '')}</td><td class="num">${l.qty == null ? '' : num(l.qty)}</td>
       <td class="num">${l.balance_after == null ? '' : num(l.balance_after)}</td></tr>`).join('')}</tbody>
   </table></div>`;
 }
 
 // ---- Заметки 📎 ----
-const NOTE_STATUS = { open: 'Открыто', pending: 'В ожидании', closed: 'Закрыто' };
+const NOTE_STATUS = { open: 'Открыто', pending: 'На паузе', closed: 'Закрыто' };
 const NOTE_IMP = { low: 'Низкая', normal: 'Обычная', high: 'Высокая' };
+const IMP_CYCLE = { low: 'normal', normal: 'high', high: 'low' };
+
+// modern segmented control
+function segmented(seg, opts, value, extra = '') {
+  return `<div class="segmented ${extra}" data-seg="${seg}">${opts.map((o) =>
+    `<button type="button" class="seg-opt ${seg}-${o.val} ${o.val === value ? 'on' : ''}" data-val="${o.val}">${o.label}</button>`).join('')}</div>`;
+}
+function bindSegmentedToggle(scope) {
+  scope.querySelectorAll('.segmented[data-toggle] .seg-opt').forEach((b) => b.onclick = () => {
+    b.parentElement.querySelectorAll('.seg-opt').forEach((x) => x.classList.remove('on'));
+    b.classList.add('on');
+  });
+}
+const segValue = (scope, seg) => { const on = scope.querySelector(`.segmented[data-seg="${seg}"] .seg-opt.on`); return on ? on.dataset.val : null; };
 const IMP_ORDER = { high: 0, normal: 1, low: 2 };
 const sortNotes = (arr) => arr.sort((a, b) => (b.pinned - a.pinned) || (IMP_ORDER[a.importance] - IMP_ORDER[b.importance]) || (b.id - a.id));
 
@@ -882,16 +898,11 @@ async function viewNotes(v) {
         <div class="composer-glow"></div>
         <textarea id="noteText" rows="1" placeholder="Напишите заметку для коллег…  (Enter — отправить, Shift+Enter — перенос строки)"></textarea>
         <div class="composer-bar">
-          <div class="row wrap" style="gap:8px">
-            <select id="noteImp" class="mini-select">
-              <option value="normal">Обычная</option>
-              <option value="high">🔴 Высокая</option>
-              <option value="low">Низкая</option>
-            </select>
-            <select id="noteStatus" class="mini-select">
-              <option value="open">Открыто</option>
-              <option value="pending">В ожидании</option>
-            </select>
+          <div class="seg-fields">
+            <div class="seg-field"><span class="seg-label">Важность</span>
+              ${segmented('imp', [{ val: 'low', label: 'Низкая' }, { val: 'normal', label: 'Обычная' }, { val: 'high', label: 'Высокая' }], 'normal', 'sm')}</div>
+            <div class="seg-field"><span class="seg-label">Статус</span>
+              ${segmented('status', [{ val: 'open', label: 'Открыто' }, { val: 'pending', label: 'На паузе' }], 'open', 'sm')}</div>
           </div>
           <button class="btn send-btn" id="noteAdd">Отправить ${ICON.send}</button>
         </div>
@@ -914,6 +925,10 @@ async function viewNotes(v) {
 
     autoGrow($('#noteText', v));
     $('#noteAdd', v).onclick = addNote;
+    // composer segmented controls toggle on click
+    const comp = $('#composer', v);
+    comp.querySelectorAll('.segmented').forEach((g) => g.querySelectorAll('.seg-opt').forEach((b) =>
+      b.onclick = () => { g.querySelectorAll('.seg-opt').forEach((x) => x.classList.remove('on')); b.classList.add('on'); }));
     // Enter — отправить заметку; Shift+Enter — перенос строки
     $('#noteText', v).addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(); } });
     const ct = $('#closedToggle', v);
@@ -925,8 +940,9 @@ async function viewNotes(v) {
       const text = ta.value;
       if (!text.trim()) { ta.focus(); return toast('Введите текст заметки', 'warn'); }
       const btn = $('#noteAdd', v); btn.classList.add('sending');
+      const comp = $('#composer', v);
       try {
-        const created = await api('/notes', { method: 'POST', body: { point_id: mine.id, text, importance: $('#noteImp', v).value, status: $('#noteStatus', v).value } });
+        const created = await api('/notes', { method: 'POST', body: { point_id: mine.id, text, importance: segValue(comp, 'imp') || 'normal', status: segValue(comp, 'status') || 'open' } });
         App.state.newNoteId = created.id;     // triggers the bubble pop-in
         await load();
       } catch {} finally { const b2 = $('#noteAdd', v); if (b2) b2.classList.remove('sending'); }
@@ -944,21 +960,14 @@ function autoGrow(ta) {
 function noteCard(n, isNew) {
   return `<div class="note-card imp-${n.importance} ${n.pinned ? 'pinned' : ''} ${n.status === 'closed' ? 'is-closed' : ''} ${isNew ? 'pop' : ''}" data-note="${n.id}">
     <div class="row between note-head" style="align-items:center;gap:8px">
-      <div class="row" style="gap:6px;flex-wrap:wrap">
-        <span class="pill imp-pill ${n.importance}">${NOTE_IMP[n.importance]}</span>
-        <span class="pill ${n.status === 'closed' ? 'closed' : n.status === 'pending' ? 'inv' : 'open'}">${NOTE_STATUS[n.status]}</span>
-      </div>
+      <button class="pill imp-pill ${n.importance}" data-imp title="Нажмите, чтобы изменить важность">${NOTE_IMP[n.importance]}</button>
       <button class="pin-btn ${n.pinned ? 'on' : ''}" data-pin title="${n.pinned ? 'Открепить' : 'Закрепить'}">📎</button>
     </div>
     <div class="note-text">${esc(n.text)}</div>
     <div class="row between note-foot">
-      <span class="muted">${esc(n.author_name || '—')} · ${fmtDate(n.created_at)}</span>
-      <div class="row" style="gap:6px">
-        <select class="mini-select note-status-sel" data-status>
-          <option value="open" ${n.status === 'open' ? 'selected' : ''}>Открыто</option>
-          <option value="pending" ${n.status === 'pending' ? 'selected' : ''}>В ожидании</option>
-          <option value="closed" ${n.status === 'closed' ? 'selected' : ''}>Закрыто</option>
-        </select>
+      <span class="muted">${emp(n.author_name)} · ${fmtDate(n.created_at)}</span>
+      <div class="row" style="gap:6px;align-items:center">
+        ${segmented('status', [{ val: 'open', label: 'Открыто' }, { val: 'pending', label: 'Пауза' }, { val: 'closed', label: 'Закрыто' }], n.status, 'sm card-status')}
         <button class="note-del" data-del title="Удалить">✕</button>
       </div>
     </div>
@@ -971,9 +980,16 @@ function bindNoteCard(cardEl, reload) {
     const pinned = !cardEl.classList.contains('pinned');
     try { await api(`/notes/${id}`, { method: 'PUT', body: { pinned } }); reload(); } catch {}
   };
-  cardEl.querySelector('[data-status]').onchange = async (e) => {
+  // status segmented control
+  cardEl.querySelectorAll('.card-status .seg-opt').forEach((b) => b.onclick = async () => {
+    if (b.classList.contains('on')) return;
     cardEl.classList.add('leaving');
-    try { await api(`/notes/${id}`, { method: 'PUT', body: { status: e.target.value } }); setTimeout(reload, 180); } catch { reload(); }
+    try { await api(`/notes/${id}`, { method: 'PUT', body: { status: b.dataset.val } }); setTimeout(reload, 180); } catch { reload(); }
+  });
+  // importance pill cycles low -> normal -> high
+  cardEl.querySelector('[data-imp]').onclick = async (e) => {
+    const cur = [...e.target.classList].find((c) => ['low', 'normal', 'high'].includes(c)) || 'normal';
+    try { await api(`/notes/${id}`, { method: 'PUT', body: { importance: IMP_CYCLE[cur] } }); reload(); } catch {}
   };
   cardEl.querySelector('[data-del]').onclick = async () => {
     cardEl.classList.add('leaving');
@@ -1004,7 +1020,7 @@ async function viewShift(v) {
     body.innerHTML = `
       <div class="row between wrap" style="margin-bottom:8px">
         <div>${statusPill(d.shift.status)} ${d.shift.needs_inventory ? '<span class="pill inv">Требуется инвентаризация</span>' : ''}</div>
-        <div class="muted">Открыта: ${fmtDate(d.shift.opened_at)} · ${esc(d.shift.opened_by_name || '')}</div>
+        <div class="muted">Открыта: ${fmtDate(d.shift.opened_at)} · ${emp(d.shift.opened_by_name)}</div>
       </div>
       <div class="kpis">
         ${kpi('Текущий остаток', num(t.current))}
@@ -1183,8 +1199,8 @@ function showDayReport(d) {
     <div style="margin-bottom:16px">
       <div style="font-size:17px;font-weight:800"><span class="mint">${esc(d.shift.point_name)}</span> · ${d.shift.business_date}</div>
       <div class="muted" style="font-size:13px;margin-top:6px;line-height:1.7">
-        Смену открыл: <b>${esc(d.shift.opened_by_name || '—')}</b> · ${fmtDate(d.shift.opened_at)}<br>
-        Смену закрыл: <b>${esc(d.shift.closed_by_name || '—')}</b> · ${fmtDate(d.shift.closed_at)}
+        Смену открыл: ${emp(d.shift.opened_by_name)} · ${fmtDate(d.shift.opened_at)}<br>
+        Смену закрыл: ${emp(d.shift.closed_by_name)} · ${fmtDate(d.shift.closed_at)}
       </div>
     </div>
     <div class="kpis" style="margin-bottom:16px">
@@ -1245,7 +1261,7 @@ async function viewPoints(v) {
     const points = await api('/points');
     body.innerHTML = points.map((p) => `<div class="card">
       <div class="row between"><h3>${esc(p.name)}</h3>${p.needs_inventory ? '<span class="pill inv">инвент.</span>' : statusPill(p.shift_status)}</div>
-      <div class="muted">${esc(p.address || '')} · BRE: ${esc(p.bre_name || '—')}</div>
+      <div class="muted">${esc(p.address || '')} · BRE: ${emp(p.bre_name)}</div>
       <div style="margin:12px 0">
         <div class="stat-line"><span>Подключено SE</span><b>${p.se_count}/${p.max_se}</b></div>
         <div class="stat-line"><span>Продажи сегодня</span><b>${num(p.sales_qty)} · ${money(p.sales_value)}</b></div>
@@ -1328,7 +1344,7 @@ async function viewAnalytics(v) {
       ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}</div>
       <div class="section-title">По точкам</div>
       <div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th></tr></thead>
-      <tbody>${d.table.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.bre_name || '—')}</td><td>${esc(r.se.join(', ') || '—')}</td><td>${statusPill(r.shift_status)}</td>
+      <tbody>${d.table.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td><td>${statusPill(r.shift_status)}</td>
         <td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td><td class="num">${money(r.stock_value)}</td></tr>`).join('')}</tbody></table></div>`;
   };
   $('#apply').onclick = load;
@@ -1385,7 +1401,7 @@ async function viewMovements(v) {
     const rows = await api('/movements?' + q.toString());
     body.innerHTML = `<table><thead><tr><th>Дата</th><th>Точка</th><th>SKU</th><th>Операция</th><th class="num">Кол-во</th><th class="num">Остаток после</th><th>Пользователь</th></tr></thead>
       <tbody>${rows.map((m) => `<tr><td>${fmtDate(m.created_at)}</td><td>${esc(m.point_name)}</td><td>${esc(m.sku_name)}</td>
-        <td>${opLabel[m.type] || m.type}</td><td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${esc(m.user_name || '—')}</td></tr>`).join('') || '<tr><td colspan=7 class="empty">Нет данных</td></tr>'}</tbody></table>`;
+        <td>${opLabel[m.type] || m.type}</td><td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${emp(m.user_name)}</td></tr>`).join('') || '<tr><td colspan=7 class="empty">Нет данных</td></tr>'}</tbody></table>`;
   };
   $('#apply').onclick = load; await load();
 }
@@ -1447,7 +1463,7 @@ async function viewUsers(v) {
   const load = async () => {
     const rows = await api('/users');
     body.innerHTML = `<table><thead><tr><th>ФИО</th><th>Логин</th><th>Роль</th><th>Статус</th><th></th></tr></thead>
-      <tbody>${rows.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.login)}</td><td>${roleLabel(u.role)}</td>
+      <tbody>${rows.map((u) => `<tr><td>${emp(u.full_name)}</td><td>${esc(u.login)}</td><td>${roleLabel(u.role)}</td>
         <td>${u.status === 'active' ? '<span class="pill open">активен</span>' : '<span class="pill danger">заблокирован</span>'}</td>
         <td class="num"><button class="btn ghost sm" data-edit="${u.id}">Изменить</button></td></tr>`).join('')}</tbody></table>`;
     body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => userForm(rows.find((u) => u.id === Number(b.dataset.edit))));
@@ -1512,7 +1528,7 @@ async function viewAudit(v) {
   const body = el('<div class="card" style="padding:0;overflow:auto"></div>'); v.appendChild(body);
   const rows = await api('/audit');
   body.innerHTML = `<table><thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Старое</th><th>Новое</th></tr></thead>
-    <tbody>${rows.map((a) => `<tr><td>${fmtDate(a.created_at)}</td><td>${esc(a.user_name || '—')}</td><td>${esc(a.action)}</td><td>${esc(a.entity || '')}</td>
+    <tbody>${rows.map((a) => `<tr><td>${fmtDate(a.created_at)}</td><td>${emp(a.user_name)}</td><td>${esc(a.action)}</td><td>${esc(a.entity || '')}</td>
       <td><span class="muted">${esc((a.old_value || '').slice(0, 60))}</span></td><td><span class="muted">${esc((a.new_value || '').slice(0, 60))}</span></td></tr>`).join('')}</tbody></table>`;
 }
 
