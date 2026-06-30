@@ -272,6 +272,29 @@ td { color: var(--ink-2); }
 .bar-row .fill { height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); border-radius: 999px; transition: width .5s var(--ease); }
 .bar-row .val { width: 100px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 700; }
 
+/* ---------- Notes ---------- */
+.note-new textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  padding: 12px 14px; font-size: 14px; background: var(--surface); color: var(--ink); outline: none; resize: vertical; }
+.note-new textarea:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.mini-select { padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); font-size: 13px; outline: none; }
+.mini-select:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.notes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.note-card { display: flex; flex-direction: column; gap: 12px; border-left: 4px solid var(--line-strong); }
+.note-card.imp-high { border-left-color: var(--danger); }
+.note-card.imp-normal { border-left-color: var(--accent); }
+.note-card.imp-low { border-left-color: var(--ink-soft); }
+.note-card.pinned { box-shadow: 0 0 0 2px var(--accent-weak), var(--shadow-sm); }
+.note-text { font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.note-foot { font-size: 12px; }
+.imp-pill.high { background: var(--danger-weak); color: var(--danger); }
+.imp-pill.normal { background: var(--accent-weak); color: var(--accent-ink); }
+.imp-pill.low { background: var(--surface-2); color: var(--ink-soft); }
+.pin-btn { border: none; background: transparent; font-size: 18px; cursor: pointer; opacity: .4;
+  filter: grayscale(1); transition: opacity .15s, transform .15s, filter .15s; }
+.pin-btn:hover { opacity: .9; transform: rotate(-15deg); }
+.pin-btn.on { opacity: 1; filter: none; transform: rotate(-25deg); }
+
 .empty { text-align: center; color: var(--ink-soft); padding: 48px; font-size: 14px; }
 .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); font-weight: 700; margin: 30px 0 14px; }
 .filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 20px; }

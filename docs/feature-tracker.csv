@@ -101,3 +101,4 @@ SE-18,SE Cabinet,SE,Списание removed from Моя смена main table,s
 SE-19,SE Cabinet,SE,Списание/возврат tab sends approval request to BRE,POST /requests pending; notify point BRE+admins,Verified,PASS,
 REQ-01,Requests,BRE/ADMIN,BRE approves/rejects stock requests for own points,POST /requests/:id/approve|reject; applies adjust to open shift,Verified,PASS,
 REQ-02,Requests,SE,Approved writeoff/return shows yellow +/- chip near SKU,shift_stock.adjust; adj-chip on Моя смена,Verified,PASS,
+SE-20,SE Cabinet,SE,Notes tab — shared notes per point with status/importance/pin,GET/POST/PUT/DELETE /notes; realtime notes:changed,Verified,PASS,Статусы открыто/в ожидании/закрыто; важность; закрепление 📎

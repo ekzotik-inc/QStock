@@ -124,6 +124,14 @@ async function loginAs(page, login, password) {
         check('UI-SE-FORECAST', /ЗАКАЗАТЬ/.test(fHeaders) && /СРЕДН/.test(fHeaders), fHeaders);
         // no red low-stock rows anywhere for SE
         check('UI-SE-NO-RED', (await page.$$('.row-low')).length === 0, 'no red low-stock rows for SE');
+
+        // Заметки: create + pin
+        await page.click('.nav a[data-route="notes"]'); await page.waitForTimeout(500);
+        check('UI-SE-NOTES-FORM', await page.isVisible('#noteAdd'), 'notes form visible');
+        await page.fill('#noteText', 'Тестовая заметка'); await page.click('#noteAdd'); await page.waitForTimeout(600);
+        check('UI-SE-NOTE-CREATE', await page.isVisible('.note-card'), 'note card appears');
+        await page.click('.note-card [data-pin]'); await page.waitForTimeout(600);
+        check('UI-SE-NOTE-PIN', await page.isVisible('.note-card.pinned'), 'note can be pinned');
       }
     }
 

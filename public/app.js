@@ -68,7 +68,7 @@ function connectSocket() {
     if ((n.type === 'request_new' || n.type === 'request_decided') &&
         (App.route === 'approvals' || App.route === 'writeoff' || App.route === 'myshift') && App._refresh) App._refresh();
   });
-  ['stock:update', 'sale:new', 'shift:changed', 'point:changed', 'sku:changed'].forEach((ev) => {
+  ['stock:update', 'sale:new', 'shift:changed', 'point:changed', 'sku:changed', 'notes:changed'].forEach((ev) => {
     App.socket.on(ev, (data) => handleRealtime(ev, data));
   });
 }
@@ -88,6 +88,10 @@ function handleRealtime(ev, data) {
     const typing = document.activeElement && document.activeElement.classList.contains('sold-input');
     const justEdited = App.state.lastSeInput && (Date.now() - App.state.lastSeInput < 2000);
     if (!typing && !justEdited) App._refresh();
+  }
+  if (App.route === 'notes' && ev === 'notes:changed' && App._refresh) {
+    const editing = document.activeElement && document.activeElement.id === 'noteText';
+    if (!editing) App._refresh();
   }
 }
 
@@ -123,6 +127,7 @@ function navItems() {
       ['arrival', 'Новое поступление'],
       ['writeoff', 'Списание / возврат'],
       ['sestock', 'Запасы в точке'],
+      ['notes', 'Заметки'],
       ['shifthistory', 'История смен'],
       ['selogs', 'Логи'],
     ];
@@ -200,6 +205,7 @@ const ICON = {
   sestock: SVG('<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v6l9 4 9-4V7"/><path d="M3 13v4l9 4 9-4v-4"/>'),
   writeoff: SVG('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/><path d="M10 11h4"/>'),
   approvals: SVG('<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
+  notes: SVG('<path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>'),
 };
 const navIcon = (route) => ICON[route] || ICON.dashboard;
 
@@ -257,7 +263,7 @@ function renderRoute() {
     movements: viewMovements, skus: viewSkus, users: viewUsers, schedules: viewSchedules, audit: viewAudit,
     // SE cabinet
     myshift: viewMyShift, arrival: viewArrival, writeoff: viewWriteoff, sestock: viewSeStock,
-    shifthistory: viewShiftHistory, selogs: viewSeLogs,
+    notes: viewNotes, shifthistory: viewShiftHistory, selogs: viewSeLogs,
     // BRE/ADMIN approvals
     approvals: viewApprovals,
   };
@@ -808,6 +814,92 @@ async function viewSeLogs(v) {
       <td>${esc(l.sku_name || '')}</td><td class="num">${l.qty == null ? '' : num(l.qty)}</td>
       <td class="num">${l.balance_after == null ? '' : num(l.balance_after)}</td></tr>`).join('')}</tbody>
   </table></div>`;
+}
+
+// ---- Заметки 📎 ----
+const NOTE_STATUS = { open: 'Открыто', pending: 'В ожидании', closed: 'Закрыто' };
+const NOTE_IMP = { low: 'Низкая', normal: 'Обычная', high: 'Высокая' };
+
+async function viewNotes(v) {
+  v.innerHTML = topbar('Заметки 📎');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const mine = await getMyPoint();
+  if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+
+  const load = async () => {
+    const notes = await api(`/notes?point_id=${mine.id}`);
+    body.innerHTML = `
+      <div class="card note-new">
+        <textarea id="noteText" rows="2" placeholder="Оставьте заметку для коллег…"></textarea>
+        <div class="row wrap" style="margin-top:12px;justify-content:space-between">
+          <div class="row wrap">
+            <select id="noteImp" class="mini-select">
+              <option value="normal">Важность: обычная</option>
+              <option value="high">Важность: высокая</option>
+              <option value="low">Важность: низкая</option>
+            </select>
+            <select id="noteStatus" class="mini-select">
+              <option value="open">Открыто</option>
+              <option value="pending">В ожидании</option>
+              <option value="closed">Закрыто</option>
+            </select>
+          </div>
+          <button class="btn" id="noteAdd">Добавить</button>
+        </div>
+      </div>
+      <div class="notes-grid" style="margin-top:18px">
+        ${notes.length ? notes.map(noteCard).join('') : '<div class="empty">Заметок пока нет.</div>'}
+      </div>`;
+    $('#noteAdd', v).onclick = async () => {
+      const text = $('#noteText', v).value;
+      if (!text.trim()) return toast('Введите текст заметки', 'warn');
+      try {
+        await api('/notes', { method: 'POST', body: { point_id: mine.id, text, importance: $('#noteImp', v).value, status: $('#noteStatus', v).value } });
+        load();
+      } catch {}
+    };
+    body.querySelectorAll('[data-note]').forEach((cardEl) => bindNoteCard(cardEl, load));
+  };
+  App._refresh = load; await load();
+}
+
+function noteCard(n) {
+  return `<div class="card note-card imp-${n.importance} ${n.pinned ? 'pinned' : ''}" data-note="${n.id}">
+    <div class="row between" style="align-items:flex-start">
+      <div class="row" style="gap:6px">
+        <span class="pill imp-pill ${n.importance}">${NOTE_IMP[n.importance]}</span>
+        <span class="pill ${n.status === 'closed' ? 'closed' : n.status === 'pending' ? 'inv' : 'open'}">${NOTE_STATUS[n.status]}</span>
+      </div>
+      <button class="pin-btn ${n.pinned ? 'on' : ''}" data-pin title="${n.pinned ? 'Открепить' : 'Закрепить'}">📎</button>
+    </div>
+    <div class="note-text">${esc(n.text)}</div>
+    <div class="row between note-foot">
+      <span class="muted">${esc(n.author_name || '—')} · ${fmtDate(n.created_at)}</span>
+      <div class="row" style="gap:6px">
+        <select class="mini-select" data-status>
+          <option value="open" ${n.status === 'open' ? 'selected' : ''}>Открыто</option>
+          <option value="pending" ${n.status === 'pending' ? 'selected' : ''}>В ожидании</option>
+          <option value="closed" ${n.status === 'closed' ? 'selected' : ''}>Закрыто</option>
+        </select>
+        <button class="btn ghost sm" data-del title="Удалить">✕</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindNoteCard(cardEl, reload) {
+  const id = cardEl.dataset.note;
+  cardEl.querySelector('[data-pin]').onclick = async () => {
+    const pinned = !cardEl.classList.contains('pinned');
+    try { await api(`/notes/${id}`, { method: 'PUT', body: { pinned } }); reload(); } catch {}
+  };
+  cardEl.querySelector('[data-status]').onchange = async (e) => {
+    try { await api(`/notes/${id}`, { method: 'PUT', body: { status: e.target.value } }); reload(); } catch {}
+  };
+  cardEl.querySelector('[data-del]').onclick = async () => {
+    try { await api(`/notes/${id}`, { method: 'DELETE' }); reload(); } catch {}
+  };
 }
 
 // ============================================================

@@ -17,6 +17,7 @@ const { router: shiftsRoutes } = require('./routes/shifts');
 const { router: inventoryRoutes } = require('./routes/inventory');
 const analyticsRoutes = require('./routes/analytics');
 const requestsRoutes = require('./routes/requests');
+const notesRoutes = require('./routes/notes');
 const miscRoutes = require('./routes/misc');
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/shifts', authRequired, shiftsRoutes);
 app.use('/api/inventory', authRequired, inventoryRoutes);
 app.use('/api/analytics', authRequired, analyticsRoutes);
 app.use('/api/requests', authRequired, requestsRoutes);
+app.use('/api/notes', authRequired, notesRoutes);
 app.use('/api', authRequired, miscRoutes);
 
 // --- static frontend ---

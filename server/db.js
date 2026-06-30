@@ -189,8 +189,21 @@ CREATE TABLE IF NOT EXISTS stock_requests (
   decided_at   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  point_id    INTEGER NOT NULL REFERENCES points(id),
+  author_id   INTEGER REFERENCES users(id),
+  text        TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','closed')),
+  importance  TEXT NOT NULL DEFAULT 'normal' CHECK(importance IN ('low','normal','high')),
+  pinned      INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_requests_point ON stock_requests(point_id, status);
+CREATE INDEX IF NOT EXISTS idx_notes_point ON notes(point_id, pinned, id);
 `);
 
 // --- lightweight migrations (add columns if missing) ---
