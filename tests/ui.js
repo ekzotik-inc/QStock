@@ -66,7 +66,7 @@ async function loginAs(page, login, password) {
 
     if (boardVisible) {
       // enter продано → evening cell must update live
-      const eveningOf = () => page.$$eval('.se-shift tbody tr[data-sku]', (trs) => trs[0].querySelectorAll('td')[3].innerText.trim());
+      const eveningOf = () => page.$$eval('.se-shift tbody tr[data-sku]', (trs) => trs[0].querySelectorAll('td')[4].innerText.trim());
       const before = await eveningOf();
       const sold = await page.$$('.sold-input'); await sold[0].fill('7'); await sold[0].press('Enter');
       await page.waitForTimeout(900);

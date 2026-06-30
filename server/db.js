@@ -177,4 +177,12 @@ CREATE INDEX IF NOT EXISTS idx_shifts_point ON shifts(point_id, status);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 `);
 
+// --- lightweight migrations (add columns if missing) ---
+function addColumn(table, col, def) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+addColumn('skus', 'safety_pct', 'REAL');   // per-SKU safety stock %, null = use default
+addColumn('skus', 'lead_days', 'REAL');    // per-SKU supplier lead time, null = use default
+
 module.exports = db;

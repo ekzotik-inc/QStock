@@ -326,6 +326,59 @@ function groupByCategory(lines) {
   return [...groups.entries()];
 }
 
+// Collapsible categories + search + clickable SKU movement, for any .se-shift table in scope.
+function bindTableTools(scope, pointId) {
+  const table = scope.querySelector('.se-shift');
+  if (table) {
+    const body = table.tBodies[0];
+    const groups = []; let cur = null;
+    [...body.rows].forEach((r) => {
+      if (r.classList.contains('cat-row')) { cur = { head: r, rows: [] }; groups.push(cur); }
+      else if (cur) cur.rows.push(r);
+    });
+    groups.forEach((g) => {
+      g.head.classList.add('collapsible');
+      g.head.addEventListener('click', () => {
+        g.collapsed = !g.collapsed;
+        g.head.classList.toggle('collapsed', g.collapsed);
+        g.rows.forEach((r) => { r.dataset.collapsed = g.collapsed ? '1' : ''; r.style.display = g.collapsed ? 'none' : ''; });
+      });
+    });
+    const search = scope.querySelector('.tbl-search');
+    if (search) search.addEventListener('input', () => {
+      const t = search.value.trim().toLowerCase();
+      groups.forEach((g) => {
+        let any = false;
+        g.rows.forEach((r) => {
+          const hit = (r.dataset.text || r.textContent.toLowerCase()).includes(t);
+          // while searching show all matches; otherwise respect collapse state
+          const show = t ? hit : g.collapsed ? false : true;
+          r.style.display = show ? '' : 'none';
+          if (hit) any = true;
+        });
+        g.head.style.display = (t && !any) ? 'none' : '';
+      });
+    });
+  }
+  // clickable SKU -> movement history
+  scope.querySelectorAll('[data-skuview]').forEach((elm) => elm.addEventListener('click', () =>
+    openSkuMovements(Number(elm.dataset.skuview), elm.dataset.name || '', pointId)));
+}
+
+async function openSkuMovements(skuId, name, pointId) {
+  const opLabel = { opening: 'Начальный остаток', carryover: 'Перенос', sale: 'Продажа', income: 'Поступление',
+    writeoff: 'Списание', adjustment: 'Корректировка', inventory: 'Инвентаризация', admin_edit: 'Правка администратора' };
+  let rows = [];
+  try { rows = await api(`/movements?sku_id=${skuId}&point_id=${pointId}&limit=100`); } catch { return; }
+  modal(`<h3>Движение — ${esc(name)}</h3>
+    ${rows.length ? `<div class="table-wrap" style="box-shadow:none"><table>
+      <thead><tr><th>Время</th><th>Операция</th><th class="num">Кол-во</th><th class="num">Остаток</th><th>Сотрудник</th></tr></thead>
+      <tbody>${rows.map((m) => `<tr><td>${fmtDate(m.created_at)}</td><td>${opLabel[m.type] || m.type}</td>
+        <td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${esc(m.user_name || '—')}</td></tr>`).join('')}</tbody>
+    </table></div>` : '<div class="empty">Движений пока нет.</div>'}
+    <div class="foot"><button class="btn secondary" onclick="closeModal()">Закрыть</button></div>`);
+}
+
 function pointPicker(v, body) {
   api('/points').then((points) => {
     body.innerHTML = `<div class="section-title">Выберите торговую точку</div><div class="cards">
@@ -371,6 +424,7 @@ async function viewMyShift(v) {
     const t = d.totals;
     const needInv = d.shift.needs_inventory;
     v.innerHTML = topbar('Моя смена', `
+      <button class="btn secondary sm" id="expBtn">Экспорт отчёта</button>
       ${needInv ? '' : '<button class="btn secondary sm" id="invBtn">Инвентаризация</button>'}
       <button class="btn dark sm" id="closeBtn">Закрыть смену</button>`);
     const wrap = el('<div class="fade-in"></div>'); v.appendChild(wrap);
@@ -387,32 +441,40 @@ async function viewMyShift(v) {
         </div>
       </div>
       ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
-      <div class="table-wrap" style="margin-top:18px">
+      <div class="row" style="margin:18px 0 0"><input class="tbl-search" placeholder="Поиск по SKU…"></div>
+      <div class="table-wrap" style="margin-top:12px">
         <table class="shift-table se-shift">
-          <thead><tr><th>SKU</th><th class="num">Утренний остаток</th><th class="num">Продано</th><th class="num">Вечерний остаток</th></tr></thead>
+          <thead><tr><th>SKU</th><th class="num">Утренний остаток</th><th class="num">Продано</th><th class="num">Списание</th><th class="num">Вечерний остаток</th></tr></thead>
           <tbody>${seTableRows(d.lines, true)}</tbody>
         </table>
       </div>`;
     const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
     const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
+    const expBtn = $('#expBtn', v); if (expBtn) expBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.csv`, '_blank');
     bindSeTable(wrap, d.shift.id);
+    bindTableTools(wrap, d.shift.point_id);
   };
   App._refresh = load; await load();
 }
 
-// rows for the SE table, grouped by category. editable=true shows продано input.
+// rows for the SE table, grouped by category. editable=true shows inputs.
 function seTableRows(lines, editable) {
   return groupByCategory(lines).map(([cat, items]) => {
-    const head = `<tr class="cat-row"><td colspan="4">${esc(cat)}</td></tr>`;
+    const head = `<tr class="cat-row"><td colspan="5">${esc(cat)}</td></tr>`;
     const rows = items.map((l) => {
       const morning = `${num(l.opening)}${l.income > 0 ? ` <span class="inc-plus">+${num(l.income)}</span>` : ''}`;
       const sold = editable
         ? `<input class="qty-input sold-input" data-sku="${l.sku_id}" type="number" min="0" step="1" value="${l.sales_qty}">`
         : `<b>${num(l.sales_qty)}</b>`;
-      return `<tr data-sku="${l.sku_id}">
-        <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
+      const wo = editable
+        ? `<input class="qty-input wo-input" data-sku="${l.sku_id}" type="number" min="0" step="1" value="${l.writeoff}">`
+        : `<b>${num(l.writeoff)}</b>`;
+      return `<tr data-sku="${l.sku_id}" data-text="${esc((l.name + ' ' + l.article).toLowerCase())}">
+        <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span>
+          <div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
         <td class="num">${morning}</td>
         <td class="num sold-cell">${sold}</td>
+        <td class="num">${wo}</td>
         <td class="num"><b>${num(l.current)}</b></td>
       </tr>`;
     }).join('');
@@ -421,18 +483,20 @@ function seTableRows(lines, editable) {
 }
 
 function bindSeTable(root, shiftId) {
-  root.querySelectorAll('.sold-input').forEach((inp) => {
+  const wire = (sel, endpoint) => root.querySelectorAll(sel).forEach((inp) => {
     const commit = async () => {
       const qty = Number(inp.value);
       if (isNaN(qty) || qty < 0) return;
       inp.classList.add('saving');
-      try { await api(`/shifts/${shiftId}/set-sales`, { method: 'POST', body: { sku_id: Number(inp.dataset.sku), qty } }); }
+      try { await api(`/shifts/${shiftId}/${endpoint}`, { method: 'POST', body: { sku_id: Number(inp.dataset.sku), qty } }); }
       catch {}
       inp.classList.remove('saving');
     };
     inp.addEventListener('change', commit);
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
   });
+  wire('.sold-input', 'set-sales');
+  wire('.wo-input', 'set-writeoff');
 }
 
 async function openManualShift(point) {
@@ -465,13 +529,15 @@ async function viewArrival(v) {
   const d = await api('/shifts/' + mine.shift_id);
   body.innerHTML = `
     <div class="muted" style="margin-bottom:14px">Укажите, сколько товара поступило в точку. После сохранения приход добавится к утреннему остатку.</div>
+    <div class="row" style="margin-bottom:12px"><input class="tbl-search" placeholder="Поиск по SKU…"></div>
     <div class="table-wrap">
       <table class="shift-table se-shift">
         <thead><tr><th>SKU</th><th class="num">Текущий остаток</th><th class="num">Приход</th></tr></thead>
         <tbody>${groupByCategory(d.lines).map(([cat, items]) => `
           <tr class="cat-row"><td colspan="3">${esc(cat)}</td></tr>
-          ${items.map((l) => `<tr data-sku="${l.sku_id}">
-            <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${esc(l.article)}</div></td>
+          ${items.map((l) => `<tr data-sku="${l.sku_id}" data-text="${esc((l.name + ' ' + l.article).toLowerCase())}">
+            <td><span class="sku-link" data-skuview="${l.sku_id}" data-name="${esc(l.name)}"><b>${esc(l.name)}</b></span>
+              <div class="muted" style="font-size:12px">${esc(l.article)}</div></td>
             <td class="num">${num(l.current)}</td>
             <td class="num"><input class="qty-input arr-input" data-sku="${l.sku_id}" type="number" min="0" value="0"></td>
           </tr>`).join('')}`).join('')}</tbody>
@@ -489,42 +555,41 @@ async function viewArrival(v) {
       App.route = 'myshift'; renderShell();
     } catch {}
   };
+  bindTableTools(v, mine.id);
 }
 
 // ---- Запасы в точке (прогноз) ----
 async function viewSeStock(v) {
-  v.innerHTML = topbar('Запасы в точке');
+  v.innerHTML = topbar('Запасы в точке', '<button class="btn secondary sm" id="expOrder">Экспорт заявки</button>');
   bindBell();
   const body = el('<div class="fade-in"></div>'); v.appendChild(body);
   const mine = await getMyPoint();
   if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
 
+  const params = () => `days=${Number($('#fDays', v).value) || 7}&horizon=${Number($('#fHor', v).value) || 7}` +
+    `&safety=${Number($('#fSafe', v).value) || 0}&lead=${Number($('#fLead', v).value) || 0}`;
+
   body.innerHTML = `
     <div class="filters">
       <div class="field"><label>Анализировать продажи за (дней)</label><input id="fDays" type="number" min="1" max="90" value="7"></div>
       <div class="field"><label>Прогноз запаса на (дней)</label><input id="fHor" type="number" min="1" max="90" value="7"></div>
-      <div class="field"><label>Страховой запас (%)</label><input id="fSafe" type="number" min="0" max="200" value="20"></div>
-      <div class="field"><label>Срок поставки (дней)</label><input id="fLead" type="number" min="0" max="90" value="2"></div>
+      <div class="field"><label>Страх. запас по умолч. (%)</label><input id="fSafe" type="number" min="0" max="200" value="20"></div>
+      <div class="field"><label>Срок поставки по умолч. (дн)</label><input id="fLead" type="number" min="0" max="90" value="2"></div>
       <button class="btn sm" id="fCalc">Рассчитать</button>
     </div>
-    <div class="muted" style="margin-bottom:16px">Средние продажи считаются только по дням, когда точка работала.
-      Рекомендуемый запас = средние × (дни прогноза + срок поставки) × (1 + страховой запас).
-      «Заказать» = рекомендуемый запас − текущий остаток. Подсветка — пора заказывать с учётом срока поставки.</div>
+    <div class="muted" style="margin-bottom:14px">Средние продажи считаются только по дням, когда точка работала.
+      Рекомендуемый запас = средние × (прогноз + срок поставки) × (1 + страховой запас).
+      У каждого SKU можно задать свои «Страх. %» и «Поставка» — они переопределяют значения по умолчанию.</div>
+    <div class="row" style="margin-bottom:12px"><input class="tbl-search" placeholder="Поиск по SKU…"></div>
     <div id="forecastOut"></div>`;
 
   const load = async () => {
-    const days = Number($('#fDays', v).value) || 7;
-    const horizon = Number($('#fHor', v).value) || 7;
-    const safety = Number($('#fSafe', v).value) || 0;
-    const lead = Number($('#fLead', v).value) || 0;
-    const d = await api(`/point-stock-forecast/${mine.id}?days=${days}&horizon=${horizon}&safety=${safety}&lead=${lead}`);
+    const d = await api(`/point-stock-forecast/${mine.id}?${params()}`);
     const out = $('#forecastOut', v);
     const totalReorder = d.rows.reduce((a, r) => a + r.reorder, 0);
     out.innerHTML = `
       <div class="kpis">
         ${kpi('Рабочих дней в периоде', d.worked_days + ' / ' + d.days)}
-        ${kpi('Прогноз + поставка', (d.horizon + d.lead) + ' дн.')}
-        ${kpi('Страховой запас', d.safety + '%')}
         ${kpi('Позиций к заказу', d.rows.filter((r) => r.reorder > 0).length)}
         ${kpi('Всего заказать (шт)', num(totalReorder), true)}
       </div>
@@ -534,26 +599,40 @@ async function viewSeStock(v) {
             <th>SKU</th>
             <th class="num">Продано за ${d.days} дн.</th>
             <th class="num">Средн./день</th>
-            <th class="num">Текущий остаток</th>
+            <th class="num">Остаток</th>
             <th class="num">Хватит на</th>
-            <th class="num">Нужно на ${d.horizon} дн.</th>
+            <th class="num">Страх. %</th>
+            <th class="num">Поставка, дн</th>
+            <th class="num">Нужно</th>
             <th class="num">Заказать</th>
           </tr></thead>
           <tbody>${groupByCategory(d.rows).map(([cat, items]) => `
-            <tr class="cat-row"><td colspan="7">${esc(cat)}</td></tr>
-            ${items.map((r) => `<tr data-sku="${r.sku_id}" class="${r.reorder_now && r.reorder > 0 ? 'reorder-now' : ''}">
-              <td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(r.article)}</div></td>
+            <tr class="cat-row"><td colspan="9">${esc(cat)}</td></tr>
+            ${items.map((r) => `<tr data-sku="${r.sku_id}" data-text="${esc((r.name + ' ' + r.article).toLowerCase())}" class="${r.reorder_now && r.reorder > 0 ? 'reorder-now' : ''}">
+              <td><span class="sku-link" data-skuview="${r.sku_id}" data-name="${esc(r.name)}"><b>${esc(r.name)}</b></span>
+                <div class="muted" style="font-size:12px">${esc(r.article)}${r.custom_logistics ? ' · своя логистика' : ''}</div></td>
               <td class="num">${num(r.sold)}</td>
               <td class="num">${num(r.per_day)}</td>
               <td class="num">${num(r.current)}</td>
               <td class="num">${r.days_left == null ? '—' : r.days_left + ' дн.'}${r.reorder_now && r.reorder > 0 ? ' <span class="pill inv">пора</span>' : ''}</td>
+              <td class="num"><input class="qty-input log-safe" data-sku="${r.sku_id}" type="number" min="0" max="200" value="${r.safety_pct}"></td>
+              <td class="num"><input class="qty-input log-lead" data-sku="${r.sku_id}" type="number" min="0" max="90" value="${r.lead_days}"></td>
               <td class="num">${num(r.recommended)}</td>
               <td class="num">${r.reorder > 0 ? `<span class="reorder-pill">+${num(r.reorder)}</span>` : '<span class="muted">—</span>'}</td>
             </tr>`).join('')}`).join('')}</tbody>
         </table>
       </div>`;
+    // save per-SKU logistics on change, then recalc
+    out.querySelectorAll('.log-safe, .log-lead').forEach((inp) => inp.addEventListener('change', async () => {
+      const row = inp.closest('tr');
+      const safety_pct = row.querySelector('.log-safe').value;
+      const lead_days = row.querySelector('.log-lead').value;
+      try { await api(`/skus/${inp.dataset.sku}/logistics`, { method: 'PUT', body: { safety_pct, lead_days } }); await load(); } catch {}
+    }));
+    bindTableTools(out, mine.id);
   };
   $('#fCalc', v).onclick = load;
+  $('#expOrder', v).onclick = () => window.open(`/api/point-stock-forecast/${mine.id}/export.csv?${params()}`, '_blank');
   await load();
 }
 

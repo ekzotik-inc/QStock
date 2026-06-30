@@ -86,19 +86,88 @@ router.get('/point-stock-forecast/:pointId', authRequired, (req, res) => {
     const sold = soldBy.get(s.id) || 0;
     const perDay = denom > 0 ? sold / denom : 0;
     const current = curBy.get(s.id) || 0;
+    // per-SKU logistics override the global defaults when set
+    const effSafety = s.safety_pct != null ? s.safety_pct : safety;
+    const effLead = s.lead_days != null ? s.lead_days : lead;
+    const custom = s.safety_pct != null || s.lead_days != null;
     // cover the forecast horizon plus the supplier lead time, plus a safety buffer
-    const recommended = Math.ceil(perDay * (horizon + lead) * (1 + safety / 100));
+    const recommended = Math.ceil(perDay * (horizon + effLead) * (1 + effSafety / 100));
     const reorder = Math.max(0, recommended - current);
     const daysLeft = perDay > 0 ? Math.floor(current / perDay) : null; // на сколько дней хватит
     // подсказка: пора заказывать, если остатка хватит только на срок поставки
-    const reorderNow = perDay > 0 && lead > 0 ? current <= perDay * lead : reorder > 0;
+    const reorderNow = perDay > 0 && effLead > 0 ? current <= perDay * effLead : reorder > 0;
     return {
       sku_id: s.id, name: s.name, article: s.article, category: s.category,
       sold, per_day: Math.round(perDay * 100) / 100, current,
       recommended, reorder, days_left: daysLeft, reorder_now: reorderNow,
+      safety_pct: effSafety, lead_days: effLead, custom_logistics: custom,
     };
   });
   res.json({ days, horizon, safety, lead, worked_days: workedDays, rows });
+});
+
+// forecast builder reused by the order-request CSV export
+function buildForecast(pid, q) {
+  const days = Math.min(Math.max(Number(q.days) || 7, 1), 90);
+  const horizon = Math.min(Math.max(Number(q.horizon) || 7, 1), 90);
+  const safety = Math.min(Math.max(Number(q.safety) || 0, 0), 200);
+  const lead = Math.min(Math.max(Number(q.lead) || 0, 0), 90);
+  const soldBy = new Map(db.prepare(
+    `SELECT sa.sku_id, COALESCE(SUM(sa.qty),0) sold FROM sales sa JOIN shifts sh ON sh.id=sa.shift_id
+     WHERE sh.point_id=? AND sa.created_at >= datetime('now', ?) GROUP BY sa.sku_id`
+  ).all(pid, `-${days} days`).map((r) => [r.sku_id, r.sold]));
+  const workedDays = db.prepare(
+    `SELECT COUNT(DISTINCT business_date) c FROM shifts WHERE point_id=? AND business_date >= date('now', ?)`
+  ).get(pid, `-${days} days`).c || 0;
+  const latest = db.prepare('SELECT id FROM shifts WHERE point_id=? ORDER BY id DESC LIMIT 1').get(pid);
+  const curBy = new Map();
+  if (latest) for (const ss of db.prepare('SELECT * FROM shift_stock WHERE shift_id=?').all(latest.id)) curBy.set(ss.sku_id, currentStock(ss));
+  const skus = db.prepare('SELECT * FROM skus WHERE active=1 ORDER BY category, name').all();
+  const rows = skus.map((s) => {
+    const sold = soldBy.get(s.id) || 0;
+    const perDay = workedDays > 0 ? sold / workedDays : 0;
+    const current = curBy.get(s.id) || 0;
+    const effSafety = s.safety_pct != null ? s.safety_pct : safety;
+    const effLead = s.lead_days != null ? s.lead_days : lead;
+    const recommended = Math.ceil(perDay * (horizon + effLead) * (1 + effSafety / 100));
+    return { name: s.name, article: s.article, category: s.category, sold,
+      per_day: Math.round(perDay * 100) / 100, current, recommended,
+      reorder: Math.max(0, recommended - current), safety_pct: effSafety, lead_days: effLead };
+  });
+  return { days, horizon, rows };
+}
+
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// Per-SKU logistics (safety %, lead days). Allowed for SE/ADMIN; null clears override.
+router.put('/skus/:id/logistics', authRequired, (req, res) => {
+  if (!['SE', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
+  const id = Number(req.params.id);
+  const sku = db.prepare('SELECT * FROM skus WHERE id=?').get(id);
+  if (!sku) return res.status(404).json({ error: 'Не найдено' });
+  const { safety_pct, lead_days } = req.body || {};
+  const sp = safety_pct === '' || safety_pct == null ? null : Math.min(Math.max(Number(safety_pct), 0), 200);
+  const ld = lead_days === '' || lead_days == null ? null : Math.min(Math.max(Number(lead_days), 0), 90);
+  db.prepare('UPDATE skus SET safety_pct=?, lead_days=? WHERE id=?').run(sp, ld, id);
+  res.json({ ok: true, safety_pct: sp, lead_days: ld });
+});
+
+// Order-request CSV (Запасы) — only positions to reorder.
+router.get('/point-stock-forecast/:pointId/export.csv', authRequired, (req, res) => {
+  const pid = Number(req.params.pointId);
+  const isSEhere = !!db.prepare('SELECT 1 FROM point_se WHERE se_id=? AND point_id=?').get(req.user.id, pid);
+  if (!isSEhere && !canSeePoint(req.user, pid)) return res.status(403).json({ error: 'Нет доступа' });
+  const f = buildForecast(pid, req.query);
+  const header = ['Категория', 'SKU', 'Артикул', 'Текущий остаток', 'Средн./день', `Нужно (${f.horizon} дн.)`, 'Заказать'];
+  const rows = f.rows.filter((r) => r.reorder > 0)
+    .map((r) => [r.category || '', r.name, r.article, r.current, r.per_day, r.recommended, r.reorder]);
+  const csv = [header, ...rows].map((line) => line.map(csvCell).join(',')).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="order-point-${pid}.csv"`);
+  res.send('﻿' + csv);
 });
 
 // SKU movement history (scoped by role)

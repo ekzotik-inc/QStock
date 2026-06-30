@@ -65,6 +65,20 @@ router.get('/:id', authRequired, (req, res) => {
   res.json(detail);
 });
 
+// shift report CSV (отчёт смены)
+router.get('/:id/export.csv', authRequired, (req, res) => {
+  const detail = shiftDetail(Number(req.params.id));
+  if (!detail) return res.status(404).json({ error: 'Не найдено' });
+  if (!canSeePoint(req.user, detail.shift.point_id)) return res.status(403).json({ error: 'Нет доступа' });
+  const cell = (v) => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const header = ['Категория', 'SKU', 'Артикул', 'Утром', 'Приход', 'Продано', 'Списание', 'Вечером', 'Сумма продаж'];
+  const rows = detail.lines.map((l) => [l.category || '', l.name, l.article, l.opening, l.income, l.sales_qty, l.writeoff, l.current, l.sales_value]);
+  const csv = [header, ...rows].map((line) => line.map(cell).join(',')).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="shift-${detail.shift.id}.csv"`);
+  res.send('﻿' + csv);
+});
+
 // open a shift. body: { point_id, carryover: bool, opening: [{sku_id, qty}] }
 router.post('/open', authRequired, (req, res) => {
   const { point_id, carryover, opening } = req.body || {};
@@ -221,6 +235,32 @@ router.post('/:id/set-sales', authRequired, (req, res) => {
   emitStockLine(shift.point_id, shiftId, skuId);
   rt.emitPoint(shift.point_id, 'sale:new', { pointId: shift.point_id, shiftId, skuId, qty: delta, value: delta * sku.price });
   checkLowStock(shift.point_id, skuId, balance);
+  res.json({ ok: true, current: balance });
+});
+
+// SET total writeoff (списание/порча) for a SKU during the shift.
+// body: { sku_id, qty } — qty is the new cumulative writeoff total.
+router.post('/:id/set-writeoff', authRequired, (req, res) => {
+  const shiftId = Number(req.params.id);
+  const shift = guardOpenWritable(req, res, shiftId);
+  if (!shift) return;
+  const skuId = Number(req.body && req.body.sku_id);
+  const qty = Number(req.body && req.body.qty);
+  if (!skuId || isNaN(qty) || qty < 0) return res.status(400).json({ error: 'Укажите SKU и количество' });
+  let row = db.prepare('SELECT * FROM shift_stock WHERE shift_id=? AND sku_id=?').get(shiftId, skuId);
+  if (!row) {
+    db.prepare('INSERT INTO shift_stock (shift_id, sku_id) VALUES (?, ?)').run(shiftId, skuId);
+    row = db.prepare('SELECT * FROM shift_stock WHERE shift_id=? AND sku_id=?').get(shiftId, skuId);
+  }
+  const delta = qty - row.writeoff;
+  if (delta === 0) return res.json({ ok: true, current: currentStock(row) });
+  db.prepare('UPDATE shift_stock SET writeoff = ? WHERE id = ?').run(qty, row.id);
+  const updated = db.prepare('SELECT * FROM shift_stock WHERE id = ?').get(row.id);
+  const balance = currentStock(updated);
+  recordMovement({ pointId: shift.point_id, shiftId, skuId, type: 'writeoff', qty: delta, balanceAfter: balance, userId: req.user.id });
+  audit({ userId: req.user.id, action: 'op_writeoff', entity: 'shift_stock',
+    newValue: { shift_id: shiftId, sku_id: skuId, total_writeoff: qty, delta, balance }, ip: req.ip });
+  emitStockLine(shift.point_id, shiftId, skuId);
   res.json({ ok: true, current: balance });
 });
 

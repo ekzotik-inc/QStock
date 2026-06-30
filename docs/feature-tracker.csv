@@ -91,3 +91,8 @@ SE-08,SE Cabinet,SE,Логи show friendly point activity (no technical data),GE
 SE-09,SE Cabinet,SE,Warm matte IQOS style with smooth animations,fade-in animations; warm matte palette,Verified,PASS,
 SE-10,SE Cabinet,SE,SE table no longer flags low stock with red,seTableRows has no row-low/danger styling,Verified,PASS,Replaced by forecast tab
 SE-11,SE Cabinet,SE,Запасы в точке forecasts needed stock from avg daily sales,GET /point-stock-forecast: avg=sold/days; recommended=ceil(avg*horizon); reorder=max(0,rec-current),Verified,PASS,Configurable analysis/horizon days
+SE-12,SE Cabinet,SE,Per-SKU safety stock and lead time override defaults,PUT /skus/:id/logistics; forecast uses per-SKU else global,Verified,PASS,Editable inline in Запасы
+SE-13,SE Cabinet,SE,Writeoff/порча column in Моя смена,POST /shifts/:id/set-writeoff; evening recalculated,Verified,PASS,
+SE-14,SE Cabinet,SE,Export order request and shift report to Excel/CSV,GET point-stock-forecast/:id/export.csv and shifts/:id/export.csv,Verified,PASS,
+SE-15,SE Cabinet,SE,Search by SKU and collapsible categories in SE tables,bindTableTools: search + collapse,Verified,PASS,
+SE-16,SE Cabinet,SE,Click a SKU to view its movement history,openSkuMovements modal via /movements,Verified,PASS,

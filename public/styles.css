@@ -191,6 +191,22 @@ td { color: var(--ink-2); }
 .reorder-pill { display: inline-block; background: var(--accent-weak); color: var(--accent-ink); font-weight: 800;
   padding: 3px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; }
 .se-shift tr.reorder-now td { background: var(--warn-weak); }
+.se-shift .log-safe, .se-shift .log-lead { width: 64px; }
+
+/* clickable SKU name -> movement history */
+.sku-link { cursor: pointer; border-bottom: 1px dashed var(--line-strong); }
+.sku-link:hover { color: var(--accent-ink); border-color: var(--accent); }
+
+/* collapsible category header */
+.se-shift .cat-row.collapsible td { cursor: pointer; user-select: none; }
+.se-shift .cat-row.collapsible td::before { content: "▾"; display: inline-block; width: 14px; color: var(--ink-soft);
+  transition: transform .2s var(--ease); }
+.se-shift .cat-row.collapsed td::before { transform: rotate(-90deg); }
+
+/* table search */
+.tbl-search { width: 280px; max-width: 100%; padding: 10px 14px; border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm); font-size: 14px; background: var(--surface); color: var(--ink); outline: none; }
+.tbl-search:focus { border-color: var(--accent); box-shadow: var(--ring); }
 .sold-input { width: 88px; text-align: right; transition: border-color .2s var(--ease), box-shadow .2s var(--ease); }
 .sold-input.saving { border-color: var(--accent); box-shadow: var(--ring); }
 .qty-input { width: 64px; padding: 9px; border: 1px solid var(--line-strong); border-radius: 10px; text-align: center;
