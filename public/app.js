@@ -206,6 +206,9 @@ const ICON = {
   writeoff: SVG('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/><path d="M10 11h4"/>'),
   approvals: SVG('<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
   notes: SVG('<path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>'),
+  grid: SVG('<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/>'),
+  rows: SVG('<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/>'),
+  send: SVG('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>'),
 };
 const navIcon = (route) => ICON[route] || ICON.dashboard;
 
@@ -819,55 +822,102 @@ async function viewSeLogs(v) {
 // ---- Заметки 📎 ----
 const NOTE_STATUS = { open: 'Открыто', pending: 'В ожидании', closed: 'Закрыто' };
 const NOTE_IMP = { low: 'Низкая', normal: 'Обычная', high: 'Высокая' };
+const IMP_ORDER = { high: 0, normal: 1, low: 2 };
+const sortNotes = (arr) => arr.sort((a, b) => (b.pinned - a.pinned) || (IMP_ORDER[a.importance] - IMP_ORDER[b.importance]) || (b.id - a.id));
 
 async function viewNotes(v) {
-  v.innerHTML = topbar('Заметки 📎');
+  if (!App.state.notesView) App.state.notesView = 'cards';
+  const mine = await getMyPoint();
+  v.innerHTML = topbar('Заметки 📎', mine ? `
+    <div class="seg">
+      <button class="seg-btn ${App.state.notesView === 'cards' ? 'on' : ''}" id="vCards" title="Карточки">${ICON.grid}</button>
+      <button class="seg-btn ${App.state.notesView === 'list' ? 'on' : ''}" id="vList" title="Список">${ICON.rows}</button>
+    </div>` : '');
   bindBell();
   const body = el('<div class="fade-in"></div>'); v.appendChild(body);
-  const mine = await getMyPoint();
   if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+
+  const setView = (mode) => { App.state.notesView = mode; renderShell(); };
+  $('#vCards', v) && ($('#vCards', v).onclick = () => setView('cards'));
+  $('#vList', v) && ($('#vList', v).onclick = () => setView('list'));
 
   const load = async () => {
     const notes = await api(`/notes?point_id=${mine.id}`);
+    const priority = sortNotes(notes.filter((n) => n.status !== 'closed' && (n.importance === 'high' || n.pinned)));
+    const active = sortNotes(notes.filter((n) => n.status !== 'closed' && !(n.importance === 'high' || n.pinned)));
+    const closed = sortNotes(notes.filter((n) => n.status === 'closed'));
+    const cls = App.state.notesView === 'list' ? 'notes-list' : 'notes-grid';
+    const showClosed = App.state.notesShowClosed;
+    const newId = App.state.newNoteId; App.state.newNoteId = null;
+    const render = (arr) => arr.map((n) => noteCard(n, n.id === newId)).join('');
+
     body.innerHTML = `
-      <div class="card note-new">
-        <textarea id="noteText" rows="2" placeholder="Оставьте заметку для коллег…"></textarea>
-        <div class="row wrap" style="margin-top:12px;justify-content:space-between">
-          <div class="row wrap">
+      <div class="composer" id="composer">
+        <div class="composer-glow"></div>
+        <textarea id="noteText" rows="1" placeholder="Напишите заметку для коллег…"></textarea>
+        <div class="composer-bar">
+          <div class="row wrap" style="gap:8px">
             <select id="noteImp" class="mini-select">
-              <option value="normal">Важность: обычная</option>
-              <option value="high">Важность: высокая</option>
-              <option value="low">Важность: низкая</option>
+              <option value="normal">Обычная</option>
+              <option value="high">🔴 Высокая</option>
+              <option value="low">Низкая</option>
             </select>
             <select id="noteStatus" class="mini-select">
               <option value="open">Открыто</option>
               <option value="pending">В ожидании</option>
-              <option value="closed">Закрыто</option>
             </select>
           </div>
-          <button class="btn" id="noteAdd">Добавить</button>
+          <button class="btn send-btn" id="noteAdd">Отправить ${ICON.send}</button>
         </div>
       </div>
-      <div class="notes-grid" style="margin-top:18px">
-        ${notes.length ? notes.map(noteCard).join('') : '<div class="empty">Заметок пока нет.</div>'}
-      </div>`;
-    $('#noteAdd', v).onclick = async () => {
-      const text = $('#noteText', v).value;
-      if (!text.trim()) return toast('Введите текст заметки', 'warn');
-      try {
-        await api('/notes', { method: 'POST', body: { point_id: mine.id, text, importance: $('#noteImp', v).value, status: $('#noteStatus', v).value } });
-        load();
-      } catch {}
-    };
+
+      ${priority.length ? `<div class="notes-section priority">
+        <div class="section-title">⭐ Приоритетные · ${priority.length}</div>
+        <div class="${cls}">${render(priority)}</div>
+      </div>` : ''}
+
+      <div class="notes-section">
+        <div class="section-title">Активные · ${active.length}</div>
+        <div class="${cls}">${active.length ? render(active) : '<div class="empty">Нет активных заметок.</div>'}</div>
+      </div>
+
+      ${closed.length ? `<div class="notes-section">
+        <button class="closed-toggle ${showClosed ? 'open' : ''}" id="closedToggle">▾ Закрытые · ${closed.length}</button>
+        <div class="${cls}" id="closedBox" style="${showClosed ? '' : 'display:none'};margin-top:12px">${render(closed)}</div>
+      </div>` : ''}`;
+
+    autoGrow($('#noteText', v));
+    $('#noteAdd', v).onclick = addNote;
+    $('#noteText', v).addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addNote(); });
+    const ct = $('#closedToggle', v);
+    if (ct) ct.onclick = () => { App.state.notesShowClosed = !App.state.notesShowClosed; const box = $('#closedBox', v); ct.classList.toggle('open'); box.style.display = App.state.notesShowClosed ? '' : 'none'; };
     body.querySelectorAll('[data-note]').forEach((cardEl) => bindNoteCard(cardEl, load));
+
+    async function addNote() {
+      const ta = $('#noteText', v);
+      const text = ta.value;
+      if (!text.trim()) { ta.focus(); return toast('Введите текст заметки', 'warn'); }
+      const btn = $('#noteAdd', v); btn.classList.add('sending');
+      try {
+        const created = await api('/notes', { method: 'POST', body: { point_id: mine.id, text, importance: $('#noteImp', v).value, status: $('#noteStatus', v).value } });
+        App.state.newNoteId = created.id;     // triggers the bubble pop-in
+        await load();
+      } catch {} finally { const b2 = $('#noteAdd', v); if (b2) b2.classList.remove('sending'); }
+    }
   };
   App._refresh = load; await load();
 }
 
-function noteCard(n) {
-  return `<div class="card note-card imp-${n.importance} ${n.pinned ? 'pinned' : ''}" data-note="${n.id}">
+function autoGrow(ta) {
+  if (!ta) return;
+  const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 200) + 'px'; };
+  ta.addEventListener('input', fit); setTimeout(fit, 0);
+}
+
+function noteCard(n, isNew) {
+  return `<div class="note-card imp-${n.importance} ${n.pinned ? 'pinned' : ''} ${n.status === 'closed' ? 'is-closed' : ''} ${isNew ? 'pop' : ''}" data-note="${n.id}">
     <div class="row between" style="align-items:flex-start">
-      <div class="row" style="gap:6px">
+      <div class="row" style="gap:6px;flex-wrap:wrap">
         <span class="pill imp-pill ${n.importance}">${NOTE_IMP[n.importance]}</span>
         <span class="pill ${n.status === 'closed' ? 'closed' : n.status === 'pending' ? 'inv' : 'open'}">${NOTE_STATUS[n.status]}</span>
       </div>
@@ -895,10 +945,12 @@ function bindNoteCard(cardEl, reload) {
     try { await api(`/notes/${id}`, { method: 'PUT', body: { pinned } }); reload(); } catch {}
   };
   cardEl.querySelector('[data-status]').onchange = async (e) => {
-    try { await api(`/notes/${id}`, { method: 'PUT', body: { status: e.target.value } }); reload(); } catch {}
+    cardEl.classList.add('leaving');
+    try { await api(`/notes/${id}`, { method: 'PUT', body: { status: e.target.value } }); setTimeout(reload, 180); } catch { reload(); }
   };
   cardEl.querySelector('[data-del]').onclick = async () => {
-    try { await api(`/notes/${id}`, { method: 'DELETE' }); reload(); } catch {}
+    cardEl.classList.add('leaving');
+    try { await api(`/notes/${id}`, { method: 'DELETE' }); setTimeout(reload, 180); } catch { reload(); }
   };
 }
 
