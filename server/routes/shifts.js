@@ -5,6 +5,7 @@ const { authRequired, requireRole } = require('../auth');
 const { audit, currentStock, today } = require('../util');
 const { canSeePoint, seConnected } = require('../access');
 const { recordMovement, checkLowStock, emitStockLine } = require('../stock');
+const { sendXlsx } = require('../xlsx');
 const rt = require('../realtime');
 
 const router = express.Router();
@@ -65,18 +66,14 @@ router.get('/:id', authRequired, (req, res) => {
   res.json(detail);
 });
 
-// shift report CSV (отчёт смены)
-router.get('/:id/export.csv', authRequired, (req, res) => {
+// shift report (отчёт смены) -> Excel
+router.get('/:id/export.xlsx', authRequired, (req, res) => {
   const detail = shiftDetail(Number(req.params.id));
   if (!detail) return res.status(404).json({ error: 'Не найдено' });
   if (!canSeePoint(req.user, detail.shift.point_id)) return res.status(403).json({ error: 'Нет доступа' });
-  const cell = (v) => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const header = ['Категория', 'SKU', 'Артикул', 'Утром', 'Приход', 'Продано', 'Списание', 'Вечером', 'Сумма продаж'];
   const rows = detail.lines.map((l) => [l.category || '', l.name, l.article, l.opening, l.income, l.sales_qty, l.writeoff, l.current, l.sales_value]);
-  const csv = [header, ...rows].map((line) => line.map(cell).join(',')).join('\r\n');
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="shift-${detail.shift.id}.csv"`);
-  res.send('﻿' + csv);
+  sendXlsx(res, `shift-${detail.shift.id}.xlsx`, [header, ...rows], 'Смена');
 });
 
 // open a shift. body: { point_id, carryover: bool, opening: [{sku_id, qty}] }

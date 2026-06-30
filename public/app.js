@@ -13,7 +13,7 @@ const App = {
 const $ = (sel, el = document) => el.querySelector(sel);
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const money = (n) => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' сўм';
+const money = (n) => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' сум';
 const num = (n) => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 const fmtDate = (s) => s ? new Date(s.replace(' ', 'T') + (s.includes('Z') ? '' : 'Z')).toLocaleString('ru-RU') : '—';
 
@@ -271,7 +271,7 @@ function renderRoute() {
 async function viewDashboard(v) {
   v.innerHTML = topbar('Дашборд', `<button class="btn secondary sm" id="exp">Экспорт в Excel</button>`);
   const body = el('<div class="grid"></div>'); v.appendChild(body);
-  $('#exp').onclick = () => window.open('/api/analytics/export.csv', '_blank');
+  $('#exp').onclick = () => window.open('/api/analytics/export.xlsx', '_blank');
   bindBell();
   const load = async () => {
     const d = await api('/analytics/dashboard');
@@ -294,7 +294,7 @@ async function viewDashboard(v) {
       </div>` : ''}
       <div class="section-title">Торговые точки</div>
       <div class="card" style="padding:0;overflow:auto">
-        <table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сўм</th><th>Обновлено</th></tr></thead>
+        <table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
         <tbody>${d.table.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.bre_name || '—')}</td><td>${esc(r.se.join(', ') || '—')}</td>
           <td>${statusPill(r.shift_status)}</td><td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td>
           <td class="num">${money(r.stock_value)}</td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
@@ -463,7 +463,7 @@ async function viewMyShift(v) {
       </div>`;
     const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
     const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
-    const expBtn = $('#expBtn', v); if (expBtn) expBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.csv`, '_blank');
+    const expBtn = $('#expBtn', v); if (expBtn) expBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.xlsx`, '_blank');
     bindSeTable(wrap, d.shift.id);
     bindTableTools(wrap, d.shift.point_id);
   };
@@ -767,7 +767,7 @@ async function viewSeStock(v) {
     bindTableTools(out, mine.id);
   };
   $('#fCalc', v).onclick = load;
-  $('#expOrder', v).onclick = () => window.open(`/api/point-stock-forecast/${mine.id}/export.csv?${params()}`, '_blank');
+  $('#expOrder', v).onclick = () => window.open(`/api/point-stock-forecast/${mine.id}/export.xlsx?${params()}`, '_blank');
   await load();
 }
 
@@ -1068,12 +1068,12 @@ async function viewAnalytics(v) {
       ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
       ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}</div>
       <div class="section-title">По точкам</div>
-      <div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сўм</th></tr></thead>
+      <div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th></tr></thead>
       <tbody>${d.table.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.bre_name || '—')}</td><td>${esc(r.se.join(', ') || '—')}</td><td>${statusPill(r.shift_status)}</td>
         <td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td><td class="num">${money(r.stock_value)}</td></tr>`).join('')}</tbody></table></div>`;
   };
   $('#apply').onclick = load;
-  $('#exp').onclick = () => { const q = new URLSearchParams(); if ($('#df').value) q.set('date_from', $('#df').value); if ($('#dt').value) q.set('date_to', $('#dt').value); window.open('/api/analytics/export.csv?' + q.toString(), '_blank'); };
+  $('#exp').onclick = () => { const q = new URLSearchParams(); if ($('#df').value) q.set('date_from', $('#df').value); if ($('#dt').value) q.set('date_to', $('#dt').value); window.open('/api/analytics/export.xlsx?' + q.toString(), '_blank'); };
   await load();
 }
 
@@ -1087,7 +1087,7 @@ async function viewKpi(v) {
   if (App.user.role === 'BRE') {
     const k = await api('/analytics/kpi/bre/' + App.user.id);
     body.innerHTML = `<div class="kpis">
-      ${kpi('Точек', k.points)} ${kpi('Сумма продаж', money(k.sales_value), true)} ${kpi('Остаток, сўм', money(k.stock_value), true)}
+      ${kpi('Точек', k.points)} ${kpi('Сумма продаж', money(k.sales_value), true)} ${kpi('Остаток, сум', money(k.stock_value), true)}
       ${kpi('Активных SE', k.active_se)} ${kpi('Незакрытых смен', k.unclosed)} ${kpi('Низкий остаток', k.low_stock)}</div>
       <div class="section-title">Рейтинг точек</div>${chartCard('Продажи', k.ranking.map((r) => [r.name, r.sales_value]))}`;
     return;
@@ -1105,7 +1105,7 @@ async function viewKpi(v) {
       ${kpi('Среднее/смена', num(k.avg_sales_per_shift))}${kpi('Инвентаризаций', k.inventories)}${kpi('Корректировок', k.adjustments)}</div>`; };
   $('#breSel').onchange = async (e) => { if (!e.target.value) return; const k = await api('/analytics/kpi/bre/' + e.target.value);
     $('#kpiOut').innerHTML = `<div class="kpis">${kpi('Точек', k.points)}${kpi('Сумма продаж', money(k.sales_value), true)}
-      ${kpi('Остаток, сўм', money(k.stock_value), true)}${kpi('Активных SE', k.active_se)}${kpi('Незакрытых смен', k.unclosed)}${kpi('Низкий остаток', k.low_stock)}</div>`; };
+      ${kpi('Остаток, сум', money(k.stock_value), true)}${kpi('Активных SE', k.active_se)}${kpi('Незакрытых смен', k.unclosed)}${kpi('Низкий остаток', k.low_stock)}</div>`; };
 }
 
 // ============================================================

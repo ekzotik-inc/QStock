@@ -137,7 +137,7 @@ async function loginAs(page, login, password) {
     check('UI-ADM-DASH', await page2.isVisible('.kpis'), 'dashboard KPIs render');
     // currency must be in сўм on the dashboard (which shows money)
     const dashText = await page2.innerText('body');
-    check('UI-CURRENCY', dashText.includes('сўм') && !dashText.includes('₽'), 'dashboard currency in сўм, no ₽');
+    check('UI-CURRENCY', dashText.includes('сум') && !dashText.includes('сўм') && !dashText.includes('₽'), 'dashboard currency in сум');
 
     // approvals inbox renders (request already approved by BRE earlier)
     await page2.click('.nav a[data-route="approvals"]'); await page2.waitForTimeout(600);

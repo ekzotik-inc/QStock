@@ -4,6 +4,7 @@ const db = require('../db');
 const { authRequired, requireRole } = require('../auth');
 const { canSeePoint, visiblePointIds } = require('../access');
 const { currentStock } = require('../util');
+const { sendXlsx } = require('../xlsx');
 
 const router = express.Router();
 
@@ -155,8 +156,8 @@ router.put('/skus/:id/logistics', authRequired, (req, res) => {
   res.json({ ok: true, safety_pct: sp, lead_days: ld });
 });
 
-// Order-request CSV (Запасы) — only positions to reorder.
-router.get('/point-stock-forecast/:pointId/export.csv', authRequired, (req, res) => {
+// Order-request (Запасы) — only positions to reorder -> Excel.
+router.get('/point-stock-forecast/:pointId/export.xlsx', authRequired, (req, res) => {
   const pid = Number(req.params.pointId);
   const isSEhere = !!db.prepare('SELECT 1 FROM point_se WHERE se_id=? AND point_id=?').get(req.user.id, pid);
   if (!isSEhere && !canSeePoint(req.user, pid)) return res.status(403).json({ error: 'Нет доступа' });
@@ -164,10 +165,7 @@ router.get('/point-stock-forecast/:pointId/export.csv', authRequired, (req, res)
   const header = ['Категория', 'SKU', 'Артикул', 'Текущий остаток', 'Средн./день', `Нужно (${f.horizon} дн.)`, 'Заказать'];
   const rows = f.rows.filter((r) => r.reorder > 0)
     .map((r) => [r.category || '', r.name, r.article, r.current, r.per_day, r.recommended, r.reorder]);
-  const csv = [header, ...rows].map((line) => line.map(csvCell).join(',')).join('\r\n');
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="order-point-${pid}.csv"`);
-  res.send('﻿' + csv);
+  sendXlsx(res, `order-point-${pid}.xlsx`, [header, ...rows], 'Заявка');
 });
 
 // SKU movement history (scoped by role)

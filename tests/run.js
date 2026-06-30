@@ -169,9 +169,9 @@ async function login(login, password) {
   check('ANL-05', dash.data.charts && dash.data.charts.sales_by_day, 'charts');
   check('ANL-06', (await req('GET', `/api/analytics/kpi/se/${seL.data.user.id}`, admin)).status === 200, 'SE KPI');
   check('ANL-07', (await req('GET', `/api/analytics/kpi/bre/${breL.data.user.id}`, admin)).status === 200, 'BRE KPI');
-  const csv = await fetch(BASE + '/api/analytics/export.csv', { headers: { Authorization: 'Bearer ' + admin } });
-  const csvText = await csv.text();
-  check('ANL-08', csv.status === 200 && csvText.includes('Точка'), 'CSV export');
+  const xls = await fetch(BASE + '/api/analytics/export.xlsx', { headers: { Authorization: 'Bearer ' + admin } });
+  const sig = Buffer.from(await xls.arrayBuffer()).slice(0, 2).toString('latin1');
+  check('ANL-08', xls.status === 200 && sig === 'PK', `Excel export (sig ${sig})`);
   check('ANL-09', (await req('GET', '/api/analytics/dashboard?date_from=2026-01-01&date_to=2026-12-31', admin)).status === 200, 'filters');
 
   console.log('== MOVEMENTS / AUDIT / NOTIFY ==');

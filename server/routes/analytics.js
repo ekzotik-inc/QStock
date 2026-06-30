@@ -4,6 +4,7 @@ const db = require('../db');
 const { authRequired } = require('../auth');
 const { currentStock, today } = require('../util');
 const { visiblePointIds } = require('../access');
+const { sendXlsx } = require('../xlsx');
 
 const router = express.Router();
 
@@ -193,26 +194,17 @@ router.get('/kpi/bre/:id', authRequired, (req, res) => {
   });
 });
 
-// CSV export (Excel-compatible)
-router.get('/export.csv', authRequired, (req, res) => {
+// Excel export (.xlsx)
+router.get('/export.xlsx', authRequired, (req, res) => {
   const { date_from, date_to } = req.query;
   const from = date_from || today(), to = date_to || today();
   const ids = visiblePointIds(req.user);
-  if (!ids.length) { res.type('text/csv'); return res.send(''); }
   const table = ids.map((pid) => pointRow(pid, from, to));
   const header = ['Точка', 'BRE', 'SE', 'Статус смены', 'Продажи (шт)', 'Сумма продаж', 'Стоимость остатка', 'Обновлено'];
   const rows = table.map((r) => [
     r.name, r.bre_name || '', r.se.join('; '), r.shift_status, r.sales_qty, r.sales_value, r.stock_value, r.last_update || '',
   ]);
-  const csv = [header, ...rows].map((line) => line.map(csvCell).join(',')).join('\r\n');
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="qstock-report-${from}_${to}.csv"`);
-  res.send('﻿' + csv); // BOM for Excel
+  sendXlsx(res, `qstock-report-${from}_${to}.xlsx`, [header, ...rows], 'Отчёт');
 });
-
-function csvCell(v) {
-  const s = String(v == null ? '' : v);
-  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
 
 module.exports = router;
