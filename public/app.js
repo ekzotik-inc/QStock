@@ -935,6 +935,67 @@ function confirmClose(d) {
     }; });
 }
 
+// Render the day report to a canvas (PNG) — no external deps
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#000'; }
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function drawReportCanvas(d) {
+  const t = d.totals;
+  const sold = d.lines.filter((l) => l.sales_qty > 0);
+  const list = sold.length ? sold : d.lines;
+  const surface = cssVar('--surface'), ink = cssVar('--ink'), inkSoft = cssVar('--ink-soft'),
+    accent = cssVar('--accent-ink'), line = cssVar('--line'), s2 = cssVar('--surface-2'), s3 = cssVar('--surface-3');
+  const W = 760, pad = 28, kpiTop = 104, kpiH = 74, headH = 38, rowH = 34;
+  const tableTop = kpiTop + kpiH + 26;
+  const H = tableTop + headH + list.length * rowH + headH + pad;
+  const dpr = 2;
+  const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr;
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
+  ctx.fillStyle = surface; ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  ctx.fillStyle = ink; ctx.font = '800 24px Manrope, Arial'; ctx.fillText('Краткий отчёт за смену', pad, 46);
+  ctx.fillStyle = inkSoft; ctx.font = '14px Manrope, Arial'; ctx.fillText(`${d.shift.point_name} · ${d.shift.business_date}`, pad, 70);
+  const kpis = [['ПРОДАНО (ШТ)', num(t.sales_qty), ink], ['СУММА ПРОДАЖ', money(t.sales_value), accent], ['СТОИМОСТЬ ОСТАТКА', money(t.stock_value), accent]];
+  const gap = 14, bw = (W - pad * 2 - gap * 2) / 3;
+  kpis.forEach((k, i) => {
+    const x = pad + i * (bw + gap);
+    ctx.fillStyle = s3; roundRect(ctx, x, kpiTop, bw, kpiH, 12); ctx.fill();
+    ctx.fillStyle = inkSoft; ctx.font = '600 11px Manrope, Arial'; ctx.fillText(k[0], x + 16, kpiTop + 26);
+    ctx.fillStyle = k[2]; ctx.font = '800 21px Manrope, Arial'; ctx.fillText(k[1], x + 16, kpiTop + 54);
+  });
+  let y = tableTop;
+  const cx = [pad + 14, W - pad - 320, W - pad - 180, W - pad - 14];
+  ctx.fillStyle = s3; roundRect(ctx, pad, y, W - pad * 2, headH, 8); ctx.fill();
+  ctx.fillStyle = inkSoft; ctx.font = '700 11px Manrope, Arial';
+  ctx.textAlign = 'left'; ctx.fillText('SKU', cx[0], y + 24);
+  ctx.textAlign = 'right'; ctx.fillText('УТРОМ', cx[1], y + 24); ctx.fillText('ПРОДАНО', cx[2], y + 24); ctx.fillText('СУММА ПРОДАЖ', cx[3], y + 24);
+  y += headH;
+  list.forEach((l) => {
+    ctx.fillStyle = ink; ctx.textAlign = 'left'; ctx.font = '14px Manrope, Arial'; ctx.fillText(l.name, cx[0], y + 22);
+    ctx.textAlign = 'right'; ctx.fillText(num(l.opening), cx[1], y + 22);
+    ctx.font = '700 14px Manrope, Arial'; ctx.fillText(num(l.sales_qty), cx[2], y + 22);
+    ctx.font = '14px Manrope, Arial'; ctx.fillText(money(l.sales_value), cx[3], y + 22);
+    ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(pad, y + rowH - 0.5); ctx.lineTo(W - pad, y + rowH - 0.5); ctx.stroke();
+    y += rowH;
+  });
+  ctx.fillStyle = s2; ctx.fillRect(pad, y, W - pad * 2, headH);
+  ctx.fillStyle = ink; ctx.font = '800 14px Manrope, Arial'; ctx.textAlign = 'left'; ctx.fillText('Итого', cx[0], y + 24);
+  ctx.textAlign = 'right'; ctx.fillText(num(t.opening), cx[1], y + 24); ctx.fillText(num(t.sales_qty), cx[2], y + 24); ctx.fillText(money(t.sales_value), cx[3], y + 24);
+  return c;
+}
+function downloadCanvas(c, filename) {
+  c.toBlob((blob) => { const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); });
+}
+function copyCanvas(c) {
+  return new Promise((resolve, reject) => c.toBlob(async (blob) => {
+    try { await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]); resolve(); }
+    catch (e) { reject(e); }
+  }));
+}
+
 // Краткий отчёт по смене (показывается после закрытия)
 function showDayReport(d) {
   const t = d.totals;
@@ -957,8 +1018,20 @@ function showDayReport(d) {
         <td class="num">${money(t.sales_value)}</td></tr></tfoot>
       </table>
     </div>
-    <div class="foot"><button class="btn" id="okReport">Готово</button></div>`,
-    (bg) => { $('#okReport', bg).onclick = () => { closeModal(); renderShell(); }; }, 'wide');
+    <div class="foot">
+      <button class="btn secondary" id="copyReport">Скопировать</button>
+      <button class="btn secondary" id="saveReport">Сохранить</button>
+      <button class="btn" id="okReport">Готово</button>
+    </div>`,
+    (bg) => {
+      const fname = `otchet-${d.shift.business_date}.png`;
+      $('#okReport', bg).onclick = () => { closeModal(); renderShell(); };
+      $('#saveReport', bg).onclick = () => downloadCanvas(drawReportCanvas(d), fname);
+      $('#copyReport', bg).onclick = async () => {
+        try { await copyCanvas(drawReportCanvas(d)); toast('Отчёт скопирован в буфер', 'ok'); }
+        catch { toast('Буфер недоступен — сохраняю файл', 'warn'); downloadCanvas(drawReportCanvas(d), fname); }
+      };
+    }, 'wide');
 }
 
 async function doInventory(d) {
