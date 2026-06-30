@@ -6,6 +6,42 @@ const { canSeePoint, visiblePointIds } = require('../access');
 
 const router = express.Router();
 
+// Friendly activity logs for one point (for SE) — human-readable, no tech data.
+router.get('/point-logs/:pointId', authRequired, (req, res) => {
+  const pid = Number(req.params.pointId);
+  const isSEhere = !!db.prepare('SELECT 1 FROM point_se WHERE se_id=? AND point_id=?').get(req.user.id, pid);
+  if (!isSEhere && !canSeePoint(req.user, pid)) return res.status(403).json({ error: 'Нет доступа' });
+
+  const opLabel = {
+    opening: 'Начальный остаток', carryover: 'Перенос остатка', sale: 'Продажа',
+    income: 'Поступление', writeoff: 'Списание', adjustment: 'Корректировка',
+    inventory: 'Инвентаризация', admin_edit: 'Изменение администратором',
+  };
+  const moves = db.prepare(
+    `SELECT m.created_at, m.type, m.qty, m.balance_after, s.name AS sku_name, u.full_name AS user_name
+     FROM movements m JOIN skus s ON s.id=m.sku_id LEFT JOIN users u ON u.id=m.user_id
+     WHERE m.point_id=? ORDER BY m.id DESC LIMIT 300`
+  ).all(pid).map((m) => ({
+    created_at: m.created_at, user_name: m.user_name || '—',
+    action: opLabel[m.type] || m.type, sku_name: m.sku_name,
+    qty: m.qty, balance_after: m.balance_after,
+  }));
+
+  // shift open/close events (human friendly)
+  const shifts = db.prepare(
+    `SELECT sh.business_date, sh.opened_at, sh.closed_at, ob.full_name AS opened_by, cb.full_name AS closed_by
+     FROM shifts sh LEFT JOIN users ob ON ob.id=sh.opened_by LEFT JOIN users cb ON cb.id=sh.closed_by
+     WHERE sh.point_id=? ORDER BY sh.id DESC LIMIT 60`
+  ).all(pid);
+  const events = [];
+  for (const sh of shifts) {
+    if (sh.opened_at) events.push({ created_at: sh.opened_at, user_name: sh.opened_by || '—', action: 'Открытие смены', sku_name: '', qty: null, balance_after: null });
+    if (sh.closed_at) events.push({ created_at: sh.closed_at, user_name: sh.closed_by || '—', action: 'Закрытие смены', sku_name: '', qty: null, balance_after: null });
+  }
+  const all = [...moves, ...events].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 300);
+  res.json(all);
+});
+
 // SKU movement history (scoped by role)
 router.get('/movements', authRequired, (req, res) => {
   const { sku_id, point_id, type, limit } = req.query;

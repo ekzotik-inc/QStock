@@ -39,7 +39,11 @@ function shiftDetail(shiftId) {
 // list shifts (filtered by visibility)
 router.get('/', authRequired, (req, res) => {
   const { point_id, status, date } = req.query;
-  let sql = `SELECT sh.*, p.name AS point_name, p.bre_id FROM shifts sh JOIN points p ON p.id = sh.point_id WHERE 1=1`;
+  let sql = `SELECT sh.*, p.name AS point_name, p.bre_id,
+                    ob.full_name AS opened_by_name, cb.full_name AS closed_by_name
+             FROM shifts sh JOIN points p ON p.id = sh.point_id
+             LEFT JOIN users ob ON ob.id = sh.opened_by
+             LEFT JOIN users cb ON cb.id = sh.closed_by WHERE 1=1`;
   const args = [];
   if (point_id) { sql += ' AND sh.point_id = ?'; args.push(Number(point_id)); }
   if (status) { sql += ' AND sh.status = ?'; args.push(status); }
@@ -184,6 +188,73 @@ router.post('/:id/op', authRequired, (req, res) => {
   }
   checkLowStock(shift.point_id, skuId, balance);
   res.json({ ok: true, current: balance });
+});
+
+// SET total sold for a SKU during the shift (SE enters the cumulative "продано").
+// body: { sku_id, qty } — qty is the new total; we store the delta as a sale.
+router.post('/:id/set-sales', authRequired, (req, res) => {
+  const shiftId = Number(req.params.id);
+  const shift = guardOpenWritable(req, res, shiftId);
+  if (!shift) return;
+  const skuId = Number(req.body && req.body.sku_id);
+  const qty = Number(req.body && req.body.qty);
+  if (!skuId || isNaN(qty) || qty < 0) return res.status(400).json({ error: 'Укажите SKU и количество' });
+  let row = db.prepare('SELECT * FROM shift_stock WHERE shift_id=? AND sku_id=?').get(shiftId, skuId);
+  if (!row) {
+    db.prepare('INSERT INTO shift_stock (shift_id, sku_id) VALUES (?, ?)').run(shiftId, skuId);
+    row = db.prepare('SELECT * FROM shift_stock WHERE shift_id=? AND sku_id=?').get(shiftId, skuId);
+  }
+  const sku = db.prepare('SELECT * FROM skus WHERE id = ?').get(skuId);
+  const delta = qty - row.sales_qty;
+  if (delta === 0) return res.json({ ok: true, current: currentStock(row) });
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE shift_stock SET sales_qty = ? WHERE id = ?').run(qty, row.id);
+    db.prepare('INSERT INTO sales (shift_id, sku_id, qty, price, user_id) VALUES (?, ?, ?, ?, ?)')
+      .run(shiftId, skuId, delta, sku.price, req.user.id);
+  });
+  tx();
+  const updated = db.prepare('SELECT * FROM shift_stock WHERE id = ?').get(row.id);
+  const balance = currentStock(updated);
+  recordMovement({ pointId: shift.point_id, shiftId, skuId, type: 'sale', qty: delta, balanceAfter: balance, userId: req.user.id });
+  audit({ userId: req.user.id, action: 'op_sale', entity: 'shift_stock',
+    newValue: { shift_id: shiftId, sku_id: skuId, total_sold: qty, delta, balance }, ip: req.ip });
+  emitStockLine(shift.point_id, shiftId, skuId);
+  rt.emitPoint(shift.point_id, 'sale:new', { pointId: shift.point_id, shiftId, skuId, qty: delta, value: delta * sku.price });
+  checkLowStock(shift.point_id, skuId, balance);
+  res.json({ ok: true, current: balance });
+});
+
+// Batch income (вкладка "Новое поступление"): adds arrival quantities.
+// body: { items: [{ sku_id, qty }] }
+router.post('/:id/income-batch', authRequired, (req, res) => {
+  const shiftId = Number(req.params.id);
+  const shift = guardOpenWritable(req, res, shiftId);
+  if (!shift) return;
+  const items = (req.body && req.body.items) || [];
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Нет данных поступления' });
+  const applied = [];
+  const tx = db.transaction(() => {
+    for (const it of items) {
+      const skuId = Number(it.sku_id);
+      const q = Number(it.qty);
+      if (!skuId || !q || q <= 0) continue;
+      let row = db.prepare('SELECT * FROM shift_stock WHERE shift_id=? AND sku_id=?').get(shiftId, skuId);
+      if (!row) {
+        db.prepare('INSERT INTO shift_stock (shift_id, sku_id) VALUES (?, ?)').run(shiftId, skuId);
+        row = db.prepare('SELECT * FROM shift_stock WHERE shift_id=? AND sku_id=?').get(shiftId, skuId);
+      }
+      db.prepare('UPDATE shift_stock SET income = income + ? WHERE id = ?').run(q, row.id);
+      const updated = db.prepare('SELECT * FROM shift_stock WHERE id = ?').get(row.id);
+      const balance = currentStock(updated);
+      recordMovement({ pointId: shift.point_id, shiftId, skuId, type: 'income', qty: q, balanceAfter: balance, userId: req.user.id });
+      applied.push({ skuId, qty: q });
+    }
+  });
+  tx();
+  if (!applied.length) return res.status(400).json({ error: 'Укажите количество хотя бы для одного SKU' });
+  audit({ userId: req.user.id, action: 'income_batch', entity: 'shift', newValue: { shift_id: shiftId, items: applied }, ip: req.ip });
+  for (const a of applied) emitStockLine(shift.point_id, shiftId, a.skuId);
+  res.json({ ok: true, applied: applied.length });
 });
 
 // close shift

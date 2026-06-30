@@ -80,3 +80,12 @@ UX-03,UX,SE,Live SKU cards with quick actions,sku cards show current+ops and upd
 UX-04,UX,All,Currency shown in Uzbek sum,money() renders сўм,Verified,PASS,
 UX-05,UX,SE,SE sees all SKU as a table (утром/приход/продано/списание/вечером/сумма),Shift view renders shift-table with per-SKU columns and totals,Verified,PASS,Redesigned from cards to table per user request
 UX-06,UX,SE,After closing a shift SE sees a short daily report,showDayReport modal shows sold qty/value and per-SKU summary,Verified,PASS,Added daily report on close
+SE-01,SE Cabinet,SE,SE navigation has 4 tabs,Моя смена / Новое поступление / История смен / Логи,Verified,PASS,Redesigned SE cabinet
+SE-02,SE Cabinet,SE,Моя смена shows SKU grouped by category with утро/продано/вечер,seTableRows grouped by admin category; вечер auto-calculated,Verified,PASS,
+SE-03,SE Cabinet,SE,SE enters total продано per SKU and evening updates live,POST /shifts/:id/set-sales stores delta as sale; realtime refresh,Verified,PASS,
+SE-04,SE Cabinet,SE,Моя смена header shows point/open time/who opened,shift-head analysis block,Verified,PASS,Close time+who shown in history
+SE-05,SE Cabinet,SE,Новое поступление adds income shown green +N on утренний остаток,POST /shifts/:id/income-batch; inc-plus rendering,Verified,PASS,
+SE-06,SE Cabinet,SE,Закрытие смены -> краткий отчёт дня; потом только админ редактирует,showDayReport; closed shift read-only,Verified,PASS,
+SE-07,SE Cabinet,SE,История смен shows closed shifts (view only) for the point,GET /shifts?point_id&status=closed; read-only detail,Verified,PASS,
+SE-08,SE Cabinet,SE,Логи show friendly point activity (no technical data),GET /point-logs/:pointId,Verified,PASS,
+SE-09,SE Cabinet,SE,Warm matte IQOS style with smooth animations,fade-in animations; warm matte palette,Verified,PASS,

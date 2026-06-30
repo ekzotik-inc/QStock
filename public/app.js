@@ -77,6 +77,11 @@ function handleRealtime(ev, data) {
   }
   if (App.route === 'points' && (ev === 'point:changed' || ev === 'shift:changed')) { if (App._refresh) App._refresh(); }
   if (ev === 'sku:changed' && App.route === 'skus') { if (App._refresh) App._refresh(); }
+  // SE "Моя смена" — live update on sales/stock/shift changes (skip while user is typing)
+  if (App.route === 'myshift' && App._refresh) {
+    const typing = document.activeElement && document.activeElement.classList.contains('sold-input');
+    if (!typing) App._refresh();
+  }
 }
 
 // ---------- login ----------
@@ -105,9 +110,16 @@ function renderLogin() {
 // ---------- shell ----------
 function navItems() {
   const r = App.user.role;
+  if (r === 'SE') {
+    return [
+      ['myshift', 'Моя смена'],
+      ['arrival', 'Новое поступление'],
+      ['shifthistory', 'История смен'],
+      ['selogs', 'Логи'],
+    ];
+  }
   const items = [];
   if (r === 'ADMIN' || r === 'BRE') items.push(['dashboard', 'Дашборд']);
-  if (r === 'SE') items.push(['mypoint', 'Моя точка']);
   if (r === 'ADMIN' || r === 'BRE') items.push(['points', 'Торговые точки']);
   items.push(['shifts', 'Смены']);
   if (r === 'ADMIN' || r === 'BRE') items.push(['analytics', 'Аналитика']);
@@ -127,12 +139,15 @@ function renderShell() {
   const shell = el(`
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand">Q<span>Stock</span></div>
-        <nav class="nav">${items.map(([k, l]) => `<a data-route="${k}" class="${k === App.route ? 'active' : ''}">${l}</a>`).join('')}</nav>
+        <div class="brand"><span class="logo">Q</span><span>Stock</span></div>
+        <nav class="nav">${items.map(([k, l]) => `<a data-route="${k}" class="${k === App.route ? 'active' : ''}">${navIcon(k)}<span>${l}</span></a>`).join('')}</nav>
         <div class="me">
-          <div class="who">${esc(App.user.full_name)}</div>
-          <div class="role">${roleLabel(App.user.role)}</div>
-          <button class="btn ghost sm" id="logoutBtn" style="margin-top:8px;padding-left:0">Выйти</button>
+          <div class="avatar">${esc(initials(App.user.full_name))}</div>
+          <div style="flex:1;min-width:0">
+            <div class="who">${esc(App.user.full_name)}</div>
+            <div class="role">${roleLabel(App.user.role)}</div>
+          </div>
+          <button class="btn ghost sm" id="logoutBtn" title="Выйти">${ICON.logout}</button>
         </div>
       </aside>
       <main class="main" id="view"></main>
@@ -145,6 +160,33 @@ function renderShell() {
 }
 
 const roleLabel = (r) => ({ ADMIN: 'Администратор', BRE: 'BRE', SE: 'Sales Expert' }[r] || r);
+
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/);
+  return ((parts[0] || '')[0] || '') + ((parts[1] || '')[0] || '');
+}
+
+// Inline stroke icons (currentColor) — clean corporate look.
+const SVG = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ICON = {
+  dashboard: SVG('<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>'),
+  mypoint: SVG('<path d="M3 9l1-5h16l1 5"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M3 9h18"/>'),
+  points: SVG('<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 8h2M13 8h2M9 12h2M13 12h2M9 16h2M13 16h2"/>'),
+  shifts: SVG('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>'),
+  analytics: SVG('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
+  kpi: SVG('<path d="M3 17l6-6 4 4 7-7"/><path d="M14 8h6v6"/>'),
+  movements: SVG('<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>'),
+  skus: SVG('<path d="M20 13l-7 7-9-9V4h7z"/><circle cx="7.5" cy="7.5" r="1.2"/>'),
+  users: SVG('<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5a3 3 0 0 1 0 6M21 20a5.5 5.5 0 0 0-4-5.3"/>'),
+  schedules: SVG('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M9 15l2 2 4-4"/>'),
+  audit: SVG('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>'),
+  logout: SVG('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>'),
+  myshift: SVG('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M9 14l2 2 4-4"/>'),
+  arrival: SVG('<path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M12 22V12M3.3 7L12 12l8.7-5"/>'),
+  shifthistory: SVG('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>'),
+  selogs: SVG('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>'),
+};
+const navIcon = (route) => ICON[route] || ICON.dashboard;
 
 function topbar(title, actionsHtml = '') {
   return `<div class="topbar"><h2>${esc(title)}</h2><div class="actions">${actionsHtml}${bellHtml()}</div></div>`;
@@ -185,11 +227,14 @@ function renderRoute() {
   App._refresh = null;
   const v = $('#view');
   const routes = {
-    dashboard: viewDashboard, monitor: viewDashboard, mypoint: viewMyPoint, points: viewPoints,
+    dashboard: viewDashboard, monitor: viewDashboard, points: viewPoints,
     shift: viewShift, shifts: viewShifts, analytics: viewAnalytics, kpi: viewKpi,
     movements: viewMovements, skus: viewSkus, users: viewUsers, schedules: viewSchedules, audit: viewAudit,
+    // SE cabinet
+    myshift: viewMyShift, arrival: viewArrival, shifthistory: viewShiftHistory, selogs: viewSeLogs,
   };
-  (routes[App.route] || viewDashboard)(v);
+  const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
+  (routes[App.route] || fallback)(v);
 }
 
 // ============================================================
@@ -248,53 +293,227 @@ function chartCard(title, pairs) {
 }
 
 // ============================================================
-// SE — MY POINT (connect + shift workflow)
+// SE CABINET
 // ============================================================
-async function viewMyPoint(v) {
-  v.innerHTML = topbar('Моя точка');
-  bindBell();
-  const body = el('<div></div>'); v.appendChild(body);
+async function getMyPoint() {
   const points = await api('/points');
-  const mine = points.find((p) => p.se_connected.some((s) => s.id === App.user.id));
-  if (!mine) {
+  return points.find((p) => p.se_connected.some((s) => s.id === App.user.id)) || null;
+}
+
+// group shift lines by SKU category (admin-defined), preserving order
+function groupByCategory(lines) {
+  const groups = new Map();
+  for (const l of lines) {
+    const cat = (l.category && l.category.trim()) || 'Без категории';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(l);
+  }
+  return [...groups.entries()];
+}
+
+function pointPicker(v, body) {
+  api('/points').then((points) => {
     body.innerHTML = `<div class="section-title">Выберите торговую точку</div><div class="cards">
-      ${points.map((p) => `<div class="card click" data-connect="${p.id}">
+      ${points.map((p) => `<div class="card click fade-in" data-connect="${p.id}">
         <h3>${esc(p.name)}</h3><div class="muted">${esc(p.address || '')}</div>
         <div class="row between" style="margin-top:14px">${statusPill(p.shift_status)}
         <span class="muted">SE: ${p.se_count}/${p.max_se}</span></div></div>`).join('')}</div>`;
     body.querySelectorAll('[data-connect]').forEach((c) => c.onclick = async () => {
-      try { await api(`/points/${c.dataset.connect}/connect`, { method: 'POST' }); viewMyPoint(v); }
-      catch {}
+      try { await api(`/points/${c.dataset.connect}/connect`, { method: 'POST' }); renderShell(); } catch {}
     });
-    return;
-  }
-  // connected — show shift
+  });
+}
+
+// ---- Моя смена ----
+async function viewMyShift(v) {
+  v.innerHTML = topbar('Моя смена');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const mine = await getMyPoint();
+  if (!mine) { pointPicker(v, body); return; }
   App.state.pointId = mine.id;
   App.socket.emit('watch:point', mine.id);
-  if (mine.shift_id) { App.route = 'shift'; App.state.shiftId = mine.shift_id; renderShell(); return; }
-  body.innerHTML = `<div class="card"><div class="row between"><div><h3>${esc(mine.name)}</h3><div class="muted">${esc(mine.address || '')}</div></div>
-    <button class="btn ghost sm" id="disc">Отключиться</button></div>
-    <p class="muted">Смена не открыта.</p>
-    <div class="row wrap"><button class="btn" id="openCarry">Перенести остатки со вчера</button>
-    <button class="btn secondary" id="openManual">Открыть и заполнить вручную</button></div></div>`;
-  $('#disc').onclick = async () => { await api(`/points/${mine.id}/disconnect`, { method: 'POST' }); viewMyPoint(v); };
-  $('#openCarry').onclick = async () => { const d = await api('/shifts/open', { method: 'POST', body: { point_id: mine.id, carryover: true } }); App.state.shiftId = d.shift.id; App.route = 'shift'; renderShell(); };
-  $('#openManual').onclick = () => openManualShift(mine);
+
+  if (!mine.shift_id) {
+    body.innerHTML = `<div class="card" style="max-width:560px">
+      <h3>${esc(mine.name)}</h3><div class="muted">${esc(mine.address || '')}</div>
+      <p class="muted" style="margin:18px 0">Смена не открыта. Перенесите остатки со вчерашней смены или введите утренний остаток вручную.</p>
+      <div class="row wrap">
+        <button class="btn" id="openCarry">Перенести остатки со вчера</button>
+        <button class="btn secondary" id="openManual">Заполнить вручную</button>
+        <button class="btn ghost" id="disc">Сменить точку</button>
+      </div></div>`;
+    $('#disc', v).onclick = async () => { await api(`/points/${mine.id}/disconnect`, { method: 'POST' }); renderShell(); };
+    $('#openCarry', v).onclick = async () => { const d = await api('/shifts/open', { method: 'POST', body: { point_id: mine.id, carryover: true } }); App.state.shiftId = d.shift.id; renderShell(); };
+    $('#openManual', v).onclick = () => openManualShift(mine);
+    return;
+  }
+
+  const load = async () => {
+    const d = await api('/shifts/' + mine.shift_id);
+    App.state.shiftId = d.shift.id;
+    App.socket.emit('watch:point', d.shift.point_id);
+    const t = d.totals;
+    const needInv = d.shift.needs_inventory;
+    v.innerHTML = topbar('Моя смена', `
+      ${needInv ? '' : '<button class="btn secondary sm" id="invBtn">Инвентаризация</button>'}
+      <button class="btn dark sm" id="closeBtn">Закрыть смену</button>`);
+    const wrap = el('<div class="fade-in"></div>'); v.appendChild(wrap);
+    wrap.innerHTML = `
+      <div class="card shift-head">
+        <div class="shift-head-main">
+          <div class="shift-head-name">${esc(d.shift.point_name)}</div>
+          <div class="muted">Смена открыта: <b>${fmtDate(d.shift.opened_at)}</b> · ${esc(d.shift.opened_by_name || '')}</div>
+        </div>
+        <div class="shift-head-stats">
+          <div><span class="muted">Продано</span><b>${num(t.sales_qty)}</b></div>
+          <div><span class="muted">Сумма продаж</span><b>${money(t.sales_value)}</b></div>
+          <div><span class="muted">Остаток вечером</span><b>${num(t.current)}</b></div>
+        </div>
+      </div>
+      ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
+      <div class="table-wrap" style="margin-top:18px">
+        <table class="shift-table se-shift">
+          <thead><tr><th>SKU</th><th class="num">Утренний остаток</th><th class="num">Продано</th><th class="num">Вечерний остаток</th></tr></thead>
+          <tbody>${seTableRows(d.lines, true)}</tbody>
+        </table>
+      </div>`;
+    const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
+    const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
+    bindSeTable(wrap, d.shift.id);
+  };
+  App._refresh = load; await load();
+}
+
+// rows for the SE table, grouped by category. editable=true shows продано input.
+function seTableRows(lines, editable) {
+  return groupByCategory(lines).map(([cat, items]) => {
+    const head = `<tr class="cat-row"><td colspan="4">${esc(cat)}</td></tr>`;
+    const rows = items.map((l) => {
+      const low = l.min_stock > 0 && l.current <= l.min_stock;
+      const morning = `${num(l.opening)}${l.income > 0 ? ` <span class="inc-plus">+${num(l.income)}</span>` : ''}`;
+      const sold = editable
+        ? `<input class="qty-input sold-input" data-sku="${l.sku_id}" type="number" min="0" step="1" value="${l.sales_qty}">`
+        : `<b>${num(l.sales_qty)}</b>`;
+      return `<tr class="${low ? 'row-low' : ''}" data-sku="${l.sku_id}">
+        <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${esc(l.article)} · ${money(l.price)}</div></td>
+        <td class="num">${morning}</td>
+        <td class="num sold-cell">${sold}</td>
+        <td class="num"><b class="${low ? 'evening-low' : ''}">${num(l.current)}</b>${low ? ' <span class="pill danger">низкий</span>' : ''}</td>
+      </tr>`;
+    }).join('');
+    return head + rows;
+  }).join('');
+}
+
+function bindSeTable(root, shiftId) {
+  root.querySelectorAll('.sold-input').forEach((inp) => {
+    const commit = async () => {
+      const qty = Number(inp.value);
+      if (isNaN(qty) || qty < 0) return;
+      inp.classList.add('saving');
+      try { await api(`/shifts/${shiftId}/set-sales`, { method: 'POST', body: { sku_id: Number(inp.dataset.sku), qty } }); }
+      catch {}
+      inp.classList.remove('saving');
+    };
+    inp.addEventListener('change', commit);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+  });
 }
 
 async function openManualShift(point) {
   const skus = await api('/skus');
+  const groups = groupByCategory(skus.map((s) => ({ ...s, category: s.category })));
   modal(`<h3>Утренний остаток — ${esc(point.name)}</h3>
-    <div class="grid">${skus.map((s) => `<div class="row between"><span>${esc(s.name)} <span class="muted">${esc(s.article)}</span></span>
-      <input class="qty-input op-open" data-sku="${s.id}" type="number" value="0" min="0"></div>`).join('')}</div>
+    <div class="manual-open">${groups.map(([cat, items]) => `
+      <div class="cat-label">${esc(cat)}</div>
+      ${items.map((s) => `<div class="row between manual-row"><span>${esc(s.name)} <span class="muted">${esc(s.article)}</span></span>
+        <input class="qty-input op-open" data-sku="${s.id}" type="number" value="0" min="0"></div>`).join('')}
+    `).join('')}</div>
     <div class="foot"><button class="btn secondary" onclick="closeModal()">Отмена</button><button class="btn" id="okOpen">Открыть смену</button></div>`,
     (bg) => {
       $('#okOpen', bg).onclick = async () => {
         const opening = [...bg.querySelectorAll('.op-open')].map((i) => ({ sku_id: Number(i.dataset.sku), qty: Number(i.value) || 0 }));
         const d = await api('/shifts/open', { method: 'POST', body: { point_id: point.id, carryover: false, opening } });
-        closeModal(); App.state.shiftId = d.shift.id; App.route = 'shift'; renderShell();
+        closeModal(); App.state.shiftId = d.shift.id; renderShell();
       };
     });
+}
+
+// ---- Новое поступление ----
+async function viewArrival(v) {
+  v.innerHTML = topbar('Новое поступление');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const mine = await getMyPoint();
+  if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+  if (!mine.shift_id) { body.innerHTML = '<div class="empty">Сначала откройте смену во вкладке «Моя смена».</div>'; return; }
+  const d = await api('/shifts/' + mine.shift_id);
+  body.innerHTML = `
+    <div class="muted" style="margin-bottom:14px">Укажите, сколько товара поступило в точку. После сохранения приход добавится к утреннему остатку.</div>
+    <div class="table-wrap">
+      <table class="shift-table se-shift">
+        <thead><tr><th>SKU</th><th class="num">Текущий остаток</th><th class="num">Приход</th></tr></thead>
+        <tbody>${groupByCategory(d.lines).map(([cat, items]) => `
+          <tr class="cat-row"><td colspan="3">${esc(cat)}</td></tr>
+          ${items.map((l) => `<tr data-sku="${l.sku_id}">
+            <td><b>${esc(l.name)}</b><div class="muted" style="font-size:12px">${esc(l.article)}</div></td>
+            <td class="num">${num(l.current)}</td>
+            <td class="num"><input class="qty-input arr-input" data-sku="${l.sku_id}" type="number" min="0" value="0"></td>
+          </tr>`).join('')}`).join('')}</tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:18px;justify-content:flex-end"><button class="btn" id="saveArr">Сохранить поступление</button></div>`;
+  $('#saveArr', v).onclick = async () => {
+    const items = [...v.querySelectorAll('.arr-input')]
+      .map((i) => ({ sku_id: Number(i.dataset.sku), qty: Number(i.value) || 0 }))
+      .filter((x) => x.qty > 0);
+    if (!items.length) return toast('Укажите количество хотя бы для одного SKU', 'warn');
+    try {
+      const r = await api(`/shifts/${mine.shift_id}/income-batch`, { method: 'POST', body: { items } });
+      toast(`Поступление сохранено (${r.applied} поз.)`, 'ok');
+      App.route = 'myshift'; renderShell();
+    } catch {}
+  };
+}
+
+// ---- История смен ----
+async function viewShiftHistory(v) {
+  v.innerHTML = topbar('История смен');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const mine = await getMyPoint();
+  if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+  const rows = await api(`/shifts?point_id=${mine.id}&status=closed`);
+  if (!rows.length) { body.innerHTML = '<div class="empty">Закрытых смен пока нет.</div>'; return; }
+  body.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Дата</th><th>Открыта</th><th>Кем открыта</th><th>Закрыта</th><th>Кем закрыта</th><th></th></tr></thead>
+    <tbody>${rows.map((s) => `<tr>
+      <td><b>${s.business_date}</b></td><td>${fmtDate(s.opened_at)}</td><td>${esc(s.opened_by_name || '—')}</td>
+      <td>${s.closed_at ? fmtDate(s.closed_at) : '—'}</td><td>${esc(s.closed_by_name || '—')}</td>
+      <td class="num"><button class="btn ghost sm" data-view="${s.id}">Просмотр</button></td></tr>`).join('')}</tbody>
+  </table></div>`;
+  body.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => {
+    App.state.shiftFrom = 'shifthistory'; openShift(Number(b.dataset.view));
+  });
+}
+
+// ---- Логи ----
+async function viewSeLogs(v) {
+  v.innerHTML = topbar('Логи');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const mine = await getMyPoint();
+  if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+  const logs = await api(`/point-logs/${mine.id}`);
+  if (!logs.length) { body.innerHTML = '<div class="empty">Записей пока нет.</div>'; return; }
+  body.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Время</th><th>Сотрудник</th><th>Действие</th><th>SKU</th><th class="num">Кол-во</th><th class="num">Остаток</th></tr></thead>
+    <tbody>${logs.map((l) => `<tr>
+      <td>${fmtDate(l.created_at)}</td><td>${esc(l.user_name)}</td><td>${esc(l.action)}</td>
+      <td>${esc(l.sku_name || '')}</td><td class="num">${l.qty == null ? '' : num(l.qty)}</td>
+      <td class="num">${l.balance_after == null ? '' : num(l.balance_after)}</td></tr>`).join('')}</tbody>
+  </table></div>`;
 }
 
 // ============================================================
@@ -357,7 +576,7 @@ async function viewShift(v) {
     // Scope to the captured view container: realtime refreshes can re-run load()
     // while a re-render is in flight, leaving document-scoped lookups null.
     const backBtn = $('#backBtn', v);
-    if (backBtn) backBtn.onclick = () => { App.route = App.user.role === 'SE' ? 'mypoint' : 'shifts'; renderShell(); };
+    if (backBtn) backBtn.onclick = () => { App.route = App.user.role === 'SE' ? (App.state.shiftFrom || 'shifthistory') : 'shifts'; renderShell(); };
     if (canEdit) {
       const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
       const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);

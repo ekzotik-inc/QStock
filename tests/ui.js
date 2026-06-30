@@ -32,22 +32,23 @@ async function loginAs(page, login, password) {
     await loginAs(page, 'se', 'se123');
     check('UI-SE-LOGIN', await page.isVisible('.sidebar'), 'logged in');
 
-    // Моя точка → connect to first point
-    await page.click('.nav a[data-route="mypoint"]');
+    // SE nav must be the cabinet tabs
+    const seNav = (await page.$$eval('.nav a', (e) => e.map((x) => x.innerText.trim()))).join('|');
+    check('UI-SE-NAV', /Моя смена/.test(seNav) && /Новое поступление/.test(seNav) && /История смен/.test(seNav) && /Логи/.test(seNav), seNav);
+
+    // Моя смена → connect to first point
+    await page.click('.nav a[data-route="myshift"]');
     await page.waitForTimeout(500);
-    const hasPointCard = await page.isVisible('.card.click, .sku-card, .stock-board');
-    check('UI-SE-POINTS', hasPointCard, 'point selection or board visible');
+    const hasPointCard = await page.isVisible('.card.click, .se-shift, #openManual');
+    check('UI-SE-POINTS', hasPointCard, 'point selection or shift visible');
 
-    // if a point-selection card is shown, connect
-    if (await page.isVisible('.card.click')) {
-      await page.click('.card.click');
-      await page.waitForTimeout(600);
-    }
+    if (await page.isVisible('.card.click')) { await page.click('.card.click'); await page.waitForTimeout(600); }
 
-    // open shift if button present
+    // open shift (fill morning stock)
     if (await page.isVisible('#openManual')) {
       await page.click('#openManual');
       await page.waitForSelector('.modal', { timeout: 3000 });
+      const ins = await page.$$('.op-open'); for (let i = 0; i < ins.length; i++) await ins[i].fill('100');
       await page.click('#okOpen');
       await page.waitForTimeout(800);
     } else if (await page.isVisible('#openCarry')) {
@@ -55,22 +56,28 @@ async function loginAs(page, login, password) {
       await page.waitForTimeout(800);
     }
 
-    // THE BUG CHECK: shift table must be visible, not bounced to default
-    const boardVisible = await page.isVisible('.shift-table tbody tr');
-    check('UI-SE-SHIFT-BOARD', boardVisible, 'shift table renders (was the routing bug)');
+    const boardVisible = await page.isVisible('.se-shift tbody tr');
+    check('UI-SE-SHIFT-BOARD', boardVisible, 'SE shift table renders');
 
-    // table has the requested columns
-    const headers = (await page.$$eval('.shift-table thead th', (e) => e.map((x) => x.innerText))).join('|');
-    check('UI-SE-TABLE-COLUMNS', /УТРОМ/.test(headers) && /ПРОДАНО/.test(headers) && /ВЕЧЕРОМ/.test(headers),
-      'columns: утром/продано/вечером');
+    // grouped table with the requested columns + category rows
+    const headers = (await page.$$eval('.se-shift thead th', (e) => e.map((x) => x.innerText))).join('|');
+    check('UI-SE-TABLE-COLUMNS', /УТРЕННИЙ/.test(headers) && /ПРОДАНО/.test(headers) && /ВЕЧЕРНИЙ/.test(headers), headers);
+    check('UI-SE-CATEGORIES', (await page.$$('.se-shift .cat-row')).length >= 1, 'SKU grouped by category');
 
     if (boardVisible) {
-      // evening-stock cell (col 6) should change after a sale
-      const before = (await page.$$eval('.shift-table tbody tr:first-child td', (e) => e.map((x) => x.innerText)))[5];
-      await page.locator('.shift-table tbody tr [data-op="sale"]').first().click();
-      await page.waitForTimeout(700);
-      const after = (await page.$$eval('.shift-table tbody tr:first-child td', (e) => e.map((x) => x.innerText)))[5];
-      check('UI-SE-SALE-LIVE', before !== after, `evening ${before} -> ${after} after sale`);
+      // enter продано → evening cell must update live
+      const eveningOf = () => page.$$eval('.se-shift tbody tr[data-sku]', (trs) => trs[0].querySelectorAll('td')[3].innerText.trim());
+      const before = await eveningOf();
+      const sold = await page.$$('.sold-input'); await sold[0].fill('7'); await sold[0].press('Enter');
+      await page.waitForTimeout(900);
+      const after = await eveningOf();
+      check('UI-SE-SALE-LIVE', before !== after, `evening ${before} -> ${after} after продано=7`);
+
+      // Новое поступление adds income shown as green +N on Моя смена
+      await page.click('.nav a[data-route="arrival"]'); await page.waitForTimeout(500);
+      const arr = await page.$$('.arr-input');
+      if (arr[0]) { await arr[0].fill('25'); await page.click('#saveArr'); await page.waitForTimeout(800); }
+      check('UI-SE-ARRIVAL-INCOME', await page.isVisible('.inc-plus'), 'income shown as green +N on Моя смена');
 
       // close shift -> daily report
       if (await page.isVisible('#closeBtn')) {
@@ -82,6 +89,12 @@ async function loginAs(page, login, password) {
         check('UI-SE-DAY-REPORT', await page.isVisible('#okReport'), 'daily report shows after close');
         if (await page.isVisible('#okReport')) await page.click('#okReport');
         await page.waitForTimeout(400);
+
+        // История смен + Логи
+        await page.click('.nav a[data-route="shifthistory"]'); await page.waitForTimeout(600);
+        check('UI-SE-HISTORY', await page.isVisible('table tbody tr'), 'closed shift in history');
+        await page.click('.nav a[data-route="selogs"]'); await page.waitForTimeout(600);
+        check('UI-SE-LOGS', await page.isVisible('table tbody tr'), 'logs visible');
       }
     }
 
