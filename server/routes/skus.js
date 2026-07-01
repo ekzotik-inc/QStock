@@ -74,6 +74,48 @@ router.post('/:id/toggle', requireRole('ADMIN'), (req, res) => {
   res.json(sku);
 });
 
+// Bulk import SKUs & prices from a template file (admin).
+// body: { rows: [{name, article, category, price, min_stock, active}] }
+router.post('/import', requireRole('ADMIN'), (req, res) => {
+  const rows = (req.body && req.body.rows) || [];
+  if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'Файл пуст или неверного формата' });
+  let created = 0, updated = 0, priceChanges = 0;
+  const errors = [];
+  const truthy = (v) => v == null || v === '' ? 1 : (/^(1|да|yes|true|активен|active)$/i.test(String(v).trim()) ? 1 : 0);
+  const tx = db.transaction(() => {
+    rows.forEach((r, i) => {
+      const name = String(r.name || '').trim();
+      const article = String(r.article || '').trim();
+      if (!name || !article) { errors.push(`Строка ${i + 2}: пустое название или артикул`); return; }
+      const price = Number(r.price) || 0;
+      const min = Number(r.min_stock) || 0;
+      const category = String(r.category || '').trim() || null;
+      const active = truthy(r.active);
+      const ex = db.prepare('SELECT * FROM skus WHERE article=?').get(article);
+      if (ex) {
+        if (price !== ex.price) {
+          db.prepare('INSERT INTO price_history (sku_id, old_price, new_price, user_id, comment) VALUES (?,?,?,?,?)')
+            .run(ex.id, ex.price, price, req.user.id, 'Импорт из файла');
+          priceChanges++;
+        }
+        db.prepare('UPDATE skus SET name=?, category=?, price=?, min_stock=?, active=? WHERE id=?')
+          .run(name, category, price, min, active, ex.id);
+        updated++;
+      } else {
+        const info = db.prepare('INSERT INTO skus (name, article, category, price, min_stock, active) VALUES (?,?,?,?,?,?)')
+          .run(name, article, category, price, min, active);
+        db.prepare('INSERT INTO price_history (sku_id, old_price, new_price, user_id, comment) VALUES (?,?,?,?,?)')
+          .run(info.lastInsertRowid, null, price, req.user.id, 'Импорт из файла');
+        created++;
+      }
+    });
+  });
+  tx();
+  audit({ userId: req.user.id, action: 'sku_import', entity: 'sku', newValue: { created, updated, priceChanges }, ip: req.ip });
+  rt.emitAll('sku:changed', {});
+  res.json({ created, updated, priceChanges, errors });
+});
+
 // Price history (admin only)
 router.get('/:id/price-history', requireRole('ADMIN'), (req, res) => {
   const rows = db.prepare(

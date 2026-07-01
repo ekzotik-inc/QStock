@@ -102,6 +102,7 @@ function handleRealtime(ev, data) {
     if (ev === 'shift:changed') { if (App._refresh) App._refresh(); }
   }
   if (App.route === 'points' && (ev === 'point:changed' || ev === 'shift:changed')) { if (App._refresh) App._refresh(); }
+  if (App.route === 'pointmon' && App._refresh) App._refresh();
   if (ev === 'sku:changed' && App.route === 'skus') { if (App._refresh) App._refresh(); }
   // SE "Моя смена" — live update on sales/stock/shift changes; skip while the SE
   // is editing or just edited (their own change is already reflected locally)
@@ -166,7 +167,7 @@ function navItems() {
 }
 
 // Detail routes that are reachable without a sidebar nav entry.
-const DETAIL_ROUTES = ['shift'];
+const DETAIL_ROUTES = ['shift', 'pointmon'];
 
 function renderShell() {
   loadNotifications();
@@ -288,8 +289,8 @@ function renderRoute() {
     // SE cabinet
     myshift: viewMyShift, arrival: viewArrival, writeoff: viewWriteoff, sestock: viewSeStock,
     notes: viewNotes, shifthistory: viewShiftHistory, selogs: viewSeLogs,
-    // BRE/ADMIN approvals
-    approvals: viewApprovals,
+    // BRE/ADMIN approvals + point monitor
+    approvals: viewApprovals, pointmon: viewPointMonitor,
   };
   const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
   (routes[App.route] || fallback)(v);
@@ -728,6 +729,61 @@ async function viewApprovals(v) {
   App._refresh = load; await load();
 }
 
+// ---- Монитор точки (BRE/ADMIN) — живая ситуация ----
+async function viewPointMonitor(v) {
+  const pid = App.state.monPid;
+  if (!pid) { App.route = 'points'; return renderShell(); }
+  bindBell();
+  if (App.socket) App.socket.emit('watch:point', pid);
+  const load = async () => {
+    const p = await api('/points/' + pid);
+    const shift = p.shift_id ? await api('/shifts/' + p.shift_id) : null;
+    const moves = await api(`/movements?point_id=${pid}&limit=40`);
+    v.innerHTML = topbar('Монитор · ' + p.name,
+      `${p.shift_id ? `<button class="btn back sm" id="detBtn">Смена подробно</button>` : ''}<button class="btn back sm" id="backBtn">Назад</button>`);
+    const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+    const t = shift ? shift.totals : null;
+    const topSales = shift ? shift.lines.filter((l) => l.sales_qty > 0).sort((a, b) => b.sales_qty - a.sales_qty).slice(0, 10) : [];
+    const opLabel = { opening: 'Нач. остаток', carryover: 'Перенос', sale: 'Продажа', income: 'Поступление', writeoff: 'Списание', adjustment: 'Корректировка', inventory: 'Инвентаризация', admin_edit: 'Правка' };
+    body.innerHTML = `
+      <div class="row between wrap" style="margin-bottom:6px">
+        <div>${p.needs_inventory ? '<span class="pill inv">инвентаризация</span>' : statusPill(p.shift_status)}
+          ${p.se_connected.length ? '· ' + p.se_connected.map((s) => emp(s.full_name)).join(', ') : '<span class="muted">нет подключённых SE</span>'}</div>
+        <div class="muted">${esc(p.address || '')} · обновлено ${fmtDate(p.last_update)}</div>
+      </div>
+      <div class="kpis">
+        ${kpi('Продажи сегодня', num(p.sales_qty))}
+        ${kpi('Сумма продаж', money(p.sales_value), true)}
+        ${kpi('Стоимость остатка', money(p.stock_value), true)}
+        ${kpi('Подключено SE', p.se_count + ' / ' + p.max_se)}
+        ${kpi('Низкий остаток', p.low_stock_count)}
+        ${kpi('Смена', p.shift_status === 'open' ? 'Открыта' : 'Закрыта')}
+      </div>
+      ${shift ? `<div class="cards">
+        <div class="card"><h3>Топ продаж сегодня</h3>${topSales.length ? topSales.map((l) => {
+          const max = Math.max(...topSales.map((x) => x.sales_qty));
+          return `<div class="bar-row"><div class="lbl">${esc(l.name)}</div><div class="track"><div class="fill" style="width:${(l.sales_qty / max * 100).toFixed(0)}%"></div></div><div class="val">${num(l.sales_qty)}</div></div>`;
+        }).join('') : '<div class="empty">Продаж пока нет</div>'}</div>
+        <div class="card"><h3>Итоги смены</h3>
+          <div class="stat-line"><span>Начальный остаток</span><b>${num(t.opening)}</b></div>
+          <div class="stat-line"><span>Приход</span><b>${num(t.income)}</b></div>
+          <div class="stat-line"><span>Продано</span><b>${num(t.sales_qty)}</b></div>
+          <div class="stat-line"><span>Списание</span><b>${num(t.writeoff)}</b></div>
+          <div class="stat-line"><span>Текущий остаток</span><b>${num(t.current)}</b></div>
+        </div>
+      </div>` : '<div class="empty">Смена не открыта.</div>'}
+      <div class="section-title">Активность</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Время</th><th>Операция</th><th>SKU</th><th class="num">Кол-во</th><th class="num">Остаток</th><th>Сотрудник</th></tr></thead>
+        <tbody>${moves.length ? moves.map((m) => `<tr><td>${fmtDate(m.created_at)}</td><td>${opLabel[m.type] || m.type}</td>
+          <td>${esc(m.sku_name)}</td><td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${emp(m.user_name)}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">Активности пока нет</td></tr>'}</tbody>
+      </table></div>`;
+    const backBtn = $('#backBtn', v); if (backBtn) backBtn.onclick = () => { App.route = App.state.monFrom || 'points'; renderShell(); };
+    const detBtn = $('#detBtn', v); if (detBtn) detBtn.onclick = () => { App.state.shiftFrom = 'pointmon'; openShift(p.shift_id); };
+  };
+  App._refresh = load; await load();
+}
+
 // ---- Запасы в точке (прогноз) ----
 async function viewSeStock(v) {
   v.innerHTML = topbar('Запасы в точке', '<button class="btn secondary sm" id="expOrder">Экспорт заявки</button>');
@@ -1056,7 +1112,7 @@ async function viewShift(v) {
     // Scope to the captured view container: realtime refreshes can re-run load()
     // while a re-render is in flight, leaving document-scoped lookups null.
     const backBtn = $('#backBtn', v);
-    if (backBtn) backBtn.onclick = () => { App.route = App.user.role === 'SE' ? (App.state.shiftFrom || 'shifthistory') : 'shifts'; renderShell(); };
+    if (backBtn) backBtn.onclick = () => { App.route = App.user.role === 'SE' ? (App.state.shiftFrom || 'shifthistory') : (App.state.shiftFrom || 'shifts'); App.state.shiftFrom = null; renderShell(); };
     if (canEdit) {
       const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
       const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
@@ -1262,18 +1318,18 @@ async function viewPoints(v) {
       <div class="row between"><h3>${esc(p.name)}</h3>${p.needs_inventory ? '<span class="pill inv">инвент.</span>' : statusPill(p.shift_status)}</div>
       <div class="muted">${esc(p.address || '')} · BRE: ${emp(p.bre_name)}</div>
       <div style="margin:12px 0">
-        <div class="stat-line"><span>Подключено SE</span><b>${p.se_count}/${p.max_se}</b></div>
+        <div class="stat-line"><span>Подключено SE</span><b>${p.se_connected.length ? p.se_connected.map((s) => emp(s.full_name)).join(', ') : `0/${p.max_se}`}</b></div>
         <div class="stat-line"><span>Продажи сегодня</span><b>${num(p.sales_qty)} · ${money(p.sales_value)}</b></div>
         <div class="stat-line"><span>Стоимость остатка</span><b>${money(p.stock_value)}</b></div>
         <div class="stat-line"><span>Низкий остаток</span><b>${p.low_stock_count}</b></div>
         <div class="stat-line"><span>Обновлено</span><b>${fmtDate(p.last_update)}</b></div>
       </div>
       <div class="row wrap">
-        ${p.shift_id ? `<button class="btn secondary sm" data-open="${p.shift_id}">Открыть смену</button>` : ''}
+        <button class="btn sm" data-mon="${p.id}">Монитор</button>
         <button class="btn ghost sm" data-inv="${p.id}" ${p.needs_inventory ? 'disabled' : ''}>Назначить инвентаризацию</button>
         ${isAdmin ? `<button class="btn ghost sm" data-edit="${p.id}">Изменить</button>` : ''}
       </div></div>`).join('');
-    body.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => openShift(Number(b.dataset.open)));
+    body.querySelectorAll('[data-mon]').forEach((b) => b.onclick = () => { App.state.monPid = Number(b.dataset.mon); App.state.monFrom = 'points'; App.route = 'pointmon'; renderShell(); });
     body.querySelectorAll('[data-inv]').forEach((b) => b.onclick = async () => { try { await api(`/inventory/assign/${b.dataset.inv}`, { method: 'POST' }); toast('Инвентаризация назначена', 'ok'); load(); } catch {} });
     body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = async () => { const p = points.find((x) => x.id === Number(b.dataset.edit)); pointForm(p); });
   };
@@ -1409,10 +1465,15 @@ async function viewMovements(v) {
 // SKUS (ADMIN)
 // ============================================================
 async function viewSkus(v) {
-  v.innerHTML = topbar('Справочник SKU', `<button class="btn sm" id="add">+ SKU</button>`);
+  v.innerHTML = topbar('Справочник SKU',
+    `<button class="btn secondary sm" id="tmpl">Шаблон</button>
+     <button class="btn secondary sm" id="imp">Импорт из файла</button>
+     <button class="btn sm" id="add">+ SKU</button>`);
   bindBell();
   const body = el('<div class="card" style="padding:0;overflow:auto"></div>'); v.appendChild(body);
   $('#add').onclick = () => skuForm();
+  $('#tmpl').onclick = () => downloadSkuTemplate();
+  $('#imp').onclick = () => importSkuFile(() => load());
   const load = async () => {
     const rows = await api('/skus?all=1');
     body.innerHTML = `<table><thead><tr><th>Название</th><th>Артикул</th><th>Категория</th><th class="num">Цена</th><th class="num">Мин. остаток</th><th>Статус</th><th></th></tr></thead>
@@ -1426,6 +1487,71 @@ async function viewSkus(v) {
     body.querySelectorAll('[data-hist]').forEach((b) => b.onclick = () => priceHistory(Number(b.dataset.hist)));
   };
   App._refresh = load; await load();
+}
+
+// download an importable SKU template (CSV with headers + example)
+function downloadSkuTemplate() {
+  const rows = [
+    ['name', 'article', 'category', 'price', 'min_stock', 'active'],
+    ['IQOS ILUMA PRIME', 'IL-PRIME', 'Устройства', '1690000', '3', '1'],
+    ['TEREA Sienna', 'TEREA-SIE', 'Стики', '32000', '20', '1'],
+  ];
+  const csv = '﻿' + rows.map((r) => r.map((c) => /[",;\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'sku-template.csv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// minimal CSV parser (handles quotes, comma/semicolon, BOM)
+function parseCSV(text) {
+  text = text.replace(/^﻿/, '');
+  const rows = []; let row = [], cur = '', q = false;
+  const delim = (text.split('\n')[0].split(';').length > text.split('\n')[0].split(',').length) ? ';' : ',';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === delim) { row.push(cur); cur = ''; }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else if (c !== '\r') cur += c;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter((r) => r.some((x) => String(x).trim() !== ''));
+}
+
+function importSkuFile(done) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.csv,text/csv';
+  inp.onchange = () => {
+    const file = inp.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const table = parseCSV(String(reader.result));
+      if (table.length < 2) return toast('В файле нет данных', 'warn');
+      const header = table[0].map((h) => h.trim().toLowerCase());
+      const idx = (keys) => header.findIndex((h) => keys.some((k) => h.includes(k)));
+      const ci = {
+        name: idx(['name', 'назв']), article: idx(['article', 'артик']), category: idx(['categ', 'катег']),
+        price: idx(['price', 'цен']), min_stock: idx(['min', 'мин']), active: idx(['active', 'актив']),
+      };
+      if (ci.name < 0 || ci.article < 0) return toast('Не найдены колонки «название»/«артикул»', 'danger');
+      const rows = table.slice(1).map((r) => ({
+        name: r[ci.name], article: r[ci.article],
+        category: ci.category >= 0 ? r[ci.category] : '',
+        price: ci.price >= 0 ? r[ci.price] : 0,
+        min_stock: ci.min_stock >= 0 ? r[ci.min_stock] : 0,
+        active: ci.active >= 0 ? r[ci.active] : '',
+      }));
+      try {
+        const res = await api('/skus/import', { method: 'POST', body: { rows } });
+        toast(`Импорт: добавлено ${res.created}, обновлено ${res.updated}, изменений цен ${res.priceChanges}`, 'ok');
+        if (res.errors && res.errors.length) toast(`Пропущено строк: ${res.errors.length}`, 'warn');
+        if (done) done();
+      } catch {}
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+  inp.click();
 }
 
 function skuForm(s) {

@@ -162,9 +162,15 @@ async function loginAs(page, login, password) {
     await page2.waitForTimeout(600);
     check('UI-ADM-POINTS', await page2.isVisible('.cards .card'), 'points cards render');
 
+    // point monitor (BRE/admin): live situation
+    await page2.click('[data-mon]'); await page2.waitForTimeout(800);
+    check('UI-MONITOR', await page2.isVisible('.kpis') && (await page2.innerText('h2')).includes('Монитор'), 'point monitor renders');
+    await page2.click('#backBtn'); await page2.waitForTimeout(500);
+
     await page2.click('.nav a[data-route="skus"]');
     await page2.waitForTimeout(600);
     check('UI-ADM-SKUS', await page2.isVisible('table'), 'SKU table renders');
+    check('UI-ADM-IMPORT', await page2.isVisible('#imp') && await page2.isVisible('#tmpl'), 'SKU import/template buttons');
 
     await page2.click('.nav a[data-route="analytics"]');
     await page2.waitForTimeout(800);
