@@ -184,15 +184,21 @@ function renderShell() {
             <div class="who">${emp(App.user.full_name)}</div>
             <div class="role">${roleLabel(App.user.role)}</div>
           </div>
-          <button class="btn ghost sm" id="logoutBtn" title="Выйти">${ICON.logout}</button>
         </div>
+        <button class="logout-item" id="logoutBtn">${ICON.logout}<span>Выйти из системы</span></button>
       </aside>
       <main class="main" id="view"></main>
     </div>`);
   document.getElementById('app').innerHTML = '';
   document.getElementById('app').appendChild(shell);
   shell.querySelectorAll('.nav a').forEach((a) => a.onclick = () => { App.route = a.dataset.route; renderShell(); });
-  $('#logoutBtn').onclick = async () => { await api('/auth/logout', { method: 'POST' }); App.user = null; if (App.socket) App.socket.disconnect(); renderLogin(); };
+  $('#logoutBtn').onclick = async () => {
+    try { await api('/auth/logout', { method: 'POST' }); } catch {}
+    App.user = null; App.state = {}; App.notifications = [];
+    if (App.socket) { App.socket.disconnect(); App.socket = null; }
+    App.route = 'dashboard';
+    renderLogin();
+  };
   renderRoute();
 }
 
