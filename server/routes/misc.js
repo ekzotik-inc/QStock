@@ -159,8 +159,10 @@ router.put('/skus/:id/logistics', authRequired, (req, res) => {
 // Procurement plan across all visible points (BRE/ADMIN).
 // Reuses the per-point forecast; marks critical positions (stock only covers lead time).
 router.get('/procurement', authRequired, (req, res) => {
-  if (!['BRE', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
-  const ids = visiblePointIds(req.user);
+  // scoped by visible points, so no separate role gate needed
+  let ids = visiblePointIds(req.user);
+  const pointFilter = Number(req.query.point_id) || null;
+  if (pointFilter) ids = ids.filter((i) => i === pointFilter);
   const points = [];
   let totalReorder = 0, criticalCount = 0;
   for (const pid of ids) {
@@ -186,8 +188,9 @@ router.get('/procurement', authRequired, (req, res) => {
 
 // Procurement plan -> Excel
 router.get('/procurement/export.xlsx', authRequired, (req, res) => {
-  if (!['BRE', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
-  const ids = visiblePointIds(req.user);
+  let ids = visiblePointIds(req.user);
+  const pointFilter = Number(req.query.point_id) || null;
+  if (pointFilter) ids = ids.filter((i) => i === pointFilter);
   const header = ['Точка', 'Категория', 'SKU', 'Артикул', 'Остаток', 'Средн./день', 'Нужно', 'Заказать', 'Срочно'];
   const out = [header];
   for (const pid of ids) {

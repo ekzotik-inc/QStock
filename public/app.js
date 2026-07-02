@@ -814,8 +814,13 @@ async function viewProcurement(v) {
   v.innerHTML = topbar('Расчёт на закуп', '<button class="btn secondary sm" id="expProc">Экспорт в Excel</button>');
   bindBell();
   const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const myPoints = await api('/points').catch(() => []);
   body.innerHTML = `
     <div class="filters">
+      <div class="field"><label>Точка</label><select id="pPoint">
+        <option value="">Все точки</option>
+        ${myPoints.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+      </select></div>
       <div class="field"><label>Анализ продаж за (дней)</label><input id="pDays" type="number" min="1" max="90" value="7"></div>
       <div class="field"><label>Запас на (дней)</label><input id="pHor" type="number" min="1" max="90" value="7"></div>
       <div class="field"><label>Страховой запас (%)</label><input id="pSafe" type="number" min="0" max="200" value="20"></div>
@@ -826,7 +831,8 @@ async function viewProcurement(v) {
       <span class="crit-badge">СРОЧНО</span> — остатка хватит только на срок поставки: везти в первую очередь.</div>
     <div id="procOut"></div>`;
   const params = () => `days=${Number($('#pDays', v).value) || 7}&horizon=${Number($('#pHor', v).value) || 7}` +
-    `&safety=${Number($('#pSafe', v).value) || 0}&lead=${Number($('#pLead', v).value) || 0}`;
+    `&safety=${Number($('#pSafe', v).value) || 0}&lead=${Number($('#pLead', v).value) || 0}` +
+    ($('#pPoint', v).value ? `&point_id=${$('#pPoint', v).value}` : '');
   const load = async () => {
     const d = await api('/procurement?' + params());
     const out = $('#procOut', v);
@@ -857,6 +863,7 @@ async function viewProcurement(v) {
         </div>`).join('') || '<div class="empty">Все точки обеспечены — закуп не требуется. 🎉</div>'}`;
   };
   $('#pCalc', v).onclick = load;
+  $('#pPoint', v).onchange = load;
   wireEnterNav(v, '.filters input', load);
   $('#expProc', v).onclick = () => window.open('/api/procurement/export.xlsx?' + params(), '_blank');
   App._refresh = load; await load();
