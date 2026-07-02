@@ -42,8 +42,18 @@ app.use('/api/notes', authRequired, notesRoutes);
 app.use('/api', authRequired, miscRoutes);
 
 // --- static frontend ---
-app.use(express.static(path.join(__dirname, '..', 'public')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+// no-cache so browsers always revalidate app.js/styles.css after a deploy
+// (stale cached JS against a newer API was breaking cabinets)
+app.use(express.static(path.join(__dirname, '..', 'public'), {
+  etag: true,
+  setHeaders: (res, filePath) => {
+    if (/\.(js|css|html)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+  },
+}));
+app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: true, credentials: true } });
