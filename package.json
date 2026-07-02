@@ -1,6 +1,6 @@
 {
   "name": "qstock",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "description": "Internal CRM for SKU stock and sales tracking across retail points",
   "main": "server/index.js",
   "type": "commonjs",

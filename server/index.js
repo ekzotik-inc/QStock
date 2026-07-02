@@ -25,6 +25,18 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
+// --- health / build info (no auth) — for deploy diagnostics ---
+const BUILD_VERSION = require('../package.json').version;
+app.get('/api/health', (req, res) => {
+  let users = -1, points = -1;
+  try {
+    const db = require('./db');
+    users = db.prepare('SELECT COUNT(*) c FROM users').get().c;
+    points = db.prepare('SELECT COUNT(*) c FROM points').get().c;
+  } catch {}
+  res.json({ ok: true, version: BUILD_VERSION, node: process.version, users, points, time: new Date().toISOString() });
+});
+
 // --- auth ---
 app.post('/api/auth/login', login);
 app.post('/api/auth/logout', logout);

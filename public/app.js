@@ -128,6 +128,7 @@ function renderLogin() {
       <div class="field"><label>Пароль</label><input id="pw" type="password" /></div>
       <button class="btn block" id="loginBtn">Войти</button>
       <div class="muted" style="margin-top:16px;font-size:12px;color:var(--ink-soft)">demo: admin/admin123 · bre/bre123 · se/se123</div>
+      <div class="muted" id="buildInfo" style="margin-top:8px;font-size:11px;color:var(--ink-soft)"></div>
     </div></div>`);
   document.getElementById('app').appendChild(card);
   const doLogin = async () => {
@@ -138,6 +139,10 @@ function renderLogin() {
   };
   $('#loginBtn').onclick = doLogin;
   card.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  // show deployed backend version for diagnostics
+  fetch('/api/health').then((r) => r.json()).then((h) => {
+    const b = $('#buildInfo'); if (b) b.textContent = `сервер v${h.version} · пользователей: ${h.users}`;
+  }).catch(() => {});
 }
 
 // ---------- shell ----------
@@ -316,7 +321,20 @@ function renderRoute() {
     approvals: viewApprovals, pointmon: viewPointMonitor, procurement: viewProcurement,
   };
   const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
-  (routes[App.route] || fallback)(v);
+  const fn = routes[App.route] || fallback;
+  // never leave a blank screen: surface render errors visibly
+  Promise.resolve()
+    .then(() => fn(v))
+    .catch((e) => {
+      console.error('view error:', e);
+      v.innerHTML = topbar('Ошибка');
+      v.appendChild(el(`<div class="card" style="max-width:640px;border-color:var(--danger)">
+        <h3>Раздел не загрузился</h3>
+        <div class="muted" style="margin:8px 0 14px">${esc(e && e.message ? e.message : 'Неизвестная ошибка')}.
+          Попробуйте обновить страницу (Ctrl+F5). Если не поможет — сервер, возможно, обновляется.</div>
+        <button class="btn" onclick="location.reload()">Обновить страницу</button></div>`));
+      bindBell();
+    });
 }
 
 // ============================================================
