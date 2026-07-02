@@ -392,6 +392,21 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 .crit-row td { background: var(--danger-weak); }
 .card.point-crit { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger-weak), var(--shadow-sm); }
 
+/* ---------- SE main-page category tabs ---------- */
+.se-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.se-tab { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);
+  padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 700; cursor: pointer;
+  transition: background .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease), transform .1s var(--ease); }
+.se-tab:hover { color: var(--ink); border-color: var(--accent); }
+.se-tab:active { transform: scale(.96); }
+.se-tab.on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+
+/* admin categories modal */
+.cat-item { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.cat-item .cat-name { flex: 1; font-weight: 700; }
+.cat-tab-lbl { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.cat-tab-lbl input { accent-color: var(--accent); width: 16px; height: 16px; }
+
 /* ---------- Tasks ---------- */
 .tasks-list { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
 .task-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px;

@@ -20,11 +20,22 @@ function shiftDetail(shiftId) {
      WHERE sh.id = ?`
   ).get(shiftId);
   if (!shift) return null;
-  const lines = db.prepare(
-    `SELECT ss.*, s.name, s.article, s.category, s.price, s.min_stock
-     FROM shift_stock ss JOIN skus s ON s.id = ss.sku_id
-     WHERE ss.shift_id = ? ORDER BY s.category, s.name`
-  ).all(shiftId).map((r) => {
+  // SKUs are global: for an OPEN shift show every active SKU (zeros when no
+  // shift_stock row yet — e.g. imported after the shift opened) plus any rows
+  // with activity on since-disabled SKUs. Closed shifts stay a frozen snapshot.
+  const linesSql = shift.status === 'open'
+    ? `SELECT s.id AS sku_id, s.name, s.article, s.category, s.price, s.min_stock,
+              COALESCE(ss.opening,0) opening, COALESCE(ss.income,0) income,
+              COALESCE(ss.sales_qty,0) sales_qty, COALESCE(ss.writeoff,0) writeoff,
+              COALESCE(ss.adjust,0) adjust
+       FROM skus s LEFT JOIN shift_stock ss ON ss.sku_id = s.id AND ss.shift_id = ?
+       WHERE s.active = 1
+          OR (ss.id IS NOT NULL AND (ss.opening<>0 OR ss.income<>0 OR ss.sales_qty<>0 OR ss.writeoff<>0 OR ss.adjust<>0))
+       ORDER BY s.category, s.name`
+    : `SELECT ss.*, s.name, s.article, s.category, s.price, s.min_stock
+       FROM shift_stock ss JOIN skus s ON s.id = ss.sku_id
+       WHERE ss.shift_id = ? ORDER BY s.category, s.name`;
+  const lines = db.prepare(linesSql).all(shiftId).map((r) => {
     const cur = currentStock(r);
     return { ...r, current: cur, stock_value: cur * r.price, sales_value: r.sales_qty * r.price };
   });

@@ -7,6 +7,38 @@ const rt = require('../realtime');
 
 const router = express.Router();
 
+// Register any SKU categories missing from sku_categories with default order:
+// Устройства=0, Стики=1, Аксессуары=2, everything else 100+.
+const DEFAULT_ORDER = { 'Устройства': 0, 'Стики': 1, 'Аксессуары': 2 };
+function syncCategories() {
+  const cats = db.prepare("SELECT DISTINCT category FROM skus WHERE category IS NOT NULL AND category <> ''").all();
+  const ins = db.prepare('INSERT OR IGNORE INTO sku_categories (name, sort_order) VALUES (?, ?)');
+  for (const { category } of cats) {
+    ins.run(category, DEFAULT_ORDER[category] != null ? DEFAULT_ORDER[category] : 100);
+  }
+}
+syncCategories();
+
+// category list with order/tab flags (all roles need it to render grouped tables)
+router.get('/categories', authRequired, (req, res) => {
+  syncCategories();
+  res.json(db.prepare('SELECT name, sort_order, as_tab FROM sku_categories ORDER BY sort_order, name').all());
+});
+
+// admin: save order + tab flags. body: { categories: [{name, sort_order, as_tab}] }
+router.put('/categories', requireRole('ADMIN'), (req, res) => {
+  const cats = (req.body && req.body.categories) || [];
+  if (!Array.isArray(cats)) return res.status(400).json({ error: 'Неверный формат' });
+  const upd = db.prepare('UPDATE sku_categories SET sort_order=?, as_tab=? WHERE name=?');
+  const tx = db.transaction(() => {
+    cats.forEach((c) => upd.run(Number(c.sort_order) || 0, c.as_tab ? 1 : 0, String(c.name)));
+  });
+  tx();
+  audit({ userId: req.user.id, action: 'categories_update', entity: 'sku_categories', newValue: cats, ip: req.ip });
+  rt.emitAll('sku:changed', {});
+  res.json(db.prepare('SELECT name, sort_order, as_tab FROM sku_categories ORDER BY sort_order, name').all());
+});
+
 // All authenticated users can read the SKU catalog (SE need prices/names).
 router.get('/', authRequired, (req, res) => {
   const all = req.query.all === '1' && req.user.role === 'ADMIN';
@@ -29,6 +61,7 @@ router.post('/', requireRole('ADMIN'), (req, res) => {
   db.prepare(`INSERT INTO price_history (sku_id, old_price, new_price, user_id, comment)
               VALUES (?, ?, ?, ?, ?)`).run(sku.id, null, sku.price, req.user.id, 'Создание SKU');
   audit({ userId: req.user.id, action: 'sku_create', entity: 'sku', newValue: sku, ip: req.ip });
+  syncCategories();
   rt.emitAll('sku:changed', { sku });
   res.json(sku);
 });
@@ -58,6 +91,7 @@ router.put('/:id', requireRole('ADMIN'), (req, res) => {
   }
   const sku = db.prepare('SELECT * FROM skus WHERE id = ?').get(id);
   audit({ userId: req.user.id, action: 'sku_update', entity: 'sku', oldValue: old, newValue: sku, ip: req.ip });
+  syncCategories();
   rt.emitAll('sku:changed', { sku });
   res.json(sku);
 });
@@ -70,6 +104,7 @@ router.post('/:id/toggle', requireRole('ADMIN'), (req, res) => {
   const sku = db.prepare('SELECT * FROM skus WHERE id = ?').get(id);
   audit({ userId: req.user.id, action: 'sku_toggle', entity: 'sku',
     oldValue: { active: old.active }, newValue: { active: sku.active }, ip: req.ip });
+  syncCategories();
   rt.emitAll('sku:changed', { sku });
   res.json(sku);
 });
@@ -112,6 +147,7 @@ router.post('/import', requireRole('ADMIN'), (req, res) => {
   });
   tx();
   audit({ userId: req.user.id, action: 'sku_import', entity: 'sku', newValue: { created, updated, priceChanges }, ip: req.ip });
+  syncCategories();
   rt.emitAll('sku:changed', {});
   res.json({ created, updated, priceChanges, errors });
 });

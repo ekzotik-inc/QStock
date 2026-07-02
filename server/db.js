@@ -201,6 +201,13 @@ CREATE TABLE IF NOT EXISTS notes (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS sku_categories (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  sort_order INTEGER NOT NULL DEFAULT 100,
+  as_tab     INTEGER NOT NULL DEFAULT 0     -- show as a separate tab on SE main page
+);
+
 CREATE TABLE IF NOT EXISTS point_tasks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   point_id    INTEGER NOT NULL REFERENCES points(id),

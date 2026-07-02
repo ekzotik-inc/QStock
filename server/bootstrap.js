@@ -28,6 +28,11 @@ function seed() {
     ['TEREA Sienna', 'TEREA-SIE', 'Стики', 32000, 20],
     ['TEREA Amber', 'TEREA-AMB', 'Стики', 32000, 20],
     ['TEREA Turquoise', 'TEREA-TUR', 'Стики', 32000, 20],
+    ['Чехол ILUMA Prime', 'ACC-CASE', 'Аксессуары', 190000, 2],
+    ['Зарядный кабель USB-C', 'ACC-CABLE', 'Аксессуары', 90000, 3],
+    ['ILUMA ONE (замена)', 'SWAP-ONE', 'Девайсы для замены', 0, 1],
+    ['ILUMA PRIME (замена)', 'SWAP-PRIME', 'Девайсы для замены', 0, 1],
+    ['ILUMA ONE (тест-драйв)', 'TD-ONE', 'Тест-драйв 14 дней', 0, 1],
   ];
   for (const [name, article, category, price, min] of skus) {
     if (!db.prepare('SELECT 1 FROM skus WHERE article=?').get(article)) {
@@ -45,7 +50,18 @@ function seed() {
     console.log('+ point ТТ Центральная');
   }
 
+  seedCategories();
   seedDemoCompass(bre);
+}
+
+// Default category order + SE main-page tabs.
+function seedCategories() {
+  const defs = [
+    ['Устройства', 0, 0], ['Стики', 1, 0], ['Аксессуары', 2, 0],
+    ['Девайсы для замены', 10, 1], ['Тест-драйв 14 дней', 11, 1],
+  ];
+  const ins = db.prepare('INSERT OR IGNORE INTO sku_categories (name, sort_order, as_tab) VALUES (?, ?, ?)');
+  for (const [name, order, tab] of defs) ins.run(name, order, tab);
 }
 
 // Demo point "Compass" with 14 days of shift history (2 teams working 2/2),
@@ -90,9 +106,12 @@ function seedDemoCompass(bre) {
 
       for (const s of skus) {
         const sticks = s.category === 'Стики';
-        const opening = idx === 0 ? (sticks ? 80 : 12) : (prevClose[s.id] || 0);
+        const devices = s.category === 'Устройства';
+        const service = !sticks && !devices;          // аксессуары / замена / тест-драйв
+        const opening = idx === 0 ? (sticks ? 80 : devices ? 12 : 3) : (prevClose[s.id] || 0);
         const income = (sticks && idx % 3 === 0) ? 40 : 0;
-        let sales = (sticks ? 9 : 1) + ((s.id * 7 + idx * 5) % (sticks ? 11 : 3));
+        let sales = service ? ((s.id + idx) % 4 === 0 ? 1 : 0)
+          : (sticks ? 9 : 1) + ((s.id * 7 + idx * 5) % (sticks ? 11 : 3));
         if (isToday) sales = Math.ceil(sales / 2);    // today's shift is mid-progress
         const writeoff = (idx % 5 === 0 && s.id % 2 === 0) ? 1 : 0;
         sales = Math.min(sales, opening + income);    // never below zero

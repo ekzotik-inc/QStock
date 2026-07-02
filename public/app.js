@@ -103,7 +103,16 @@ function handleRealtime(ev, data) {
   }
   if (App.route === 'points' && (ev === 'point:changed' || ev === 'shift:changed')) { if (App._refresh) App._refresh(); }
   if (App.route === 'pointmon' && App._refresh) App._refresh();
-  if (ev === 'sku:changed' && App.route === 'skus') { if (App._refresh) App._refresh(); }
+  // SKUs are global: refresh every SKU-dependent view instantly (unless typing)
+  if (ev === 'sku:changed') {
+    App.state.catOrder = null; // categories may have changed — reload lazily
+    const skuViews = ['skus', 'myshift', 'arrival', 'sestock', 'procurement', 'writeoff'];
+    if (skuViews.includes(App.route) && App._refresh) {
+      const ae = document.activeElement;
+      const typing = ae && (ae.classList.contains('sold-input') || ae.classList.contains('arr-input') || ae.tagName === 'INPUT' && ae.closest('.filters'));
+      if (!typing) App._refresh();
+    }
+  }
   // SE "Моя смена" — live update on sales/stock/shift changes; skip while the SE
   // is editing or just edited (their own change is already reflected locally)
   if (App.route === 'myshift' && App._refresh) {
@@ -429,7 +438,18 @@ async function getMyPoint() {
   return points.find((p) => p.se_connected.some((s) => s.id === App.user.id)) || null;
 }
 
-// group shift lines by SKU category (admin-defined), preserving order
+// admin-defined category order/tabs, cached; invalidated on sku:changed
+async function getCategories() {
+  if (!App.state.catOrder) {
+    const cats = await api('/skus/categories').catch(() => []);
+    App.state.catOrder = new Map(cats.map((c) => [c.name, c.sort_order]));
+    App.state.catTabs = cats.filter((c) => c.as_tab).map((c) => c.name);
+  }
+  return { order: App.state.catOrder, tabs: App.state.catTabs || [] };
+}
+
+// group shift lines by SKU category, sorted by the admin-defined order
+// (Устройства → Стики → Аксессуары → остальные)
 function groupByCategory(lines) {
   const groups = new Map();
   for (const l of lines) {
@@ -437,7 +457,9 @@ function groupByCategory(lines) {
     if (!groups.has(cat)) groups.set(cat, []);
     groups.get(cat).push(l);
   }
-  return [...groups.entries()];
+  const ord = App.state.catOrder || new Map();
+  return [...groups.entries()].sort((a, b) =>
+    ((ord.has(a[0]) ? ord.get(a[0]) : 999) - (ord.has(b[0]) ? ord.get(b[0]) : 999)) || a[0].localeCompare(b[0], 'ru'));
 }
 
 // Collapsible categories + search + clickable SKU movement, for any .se-shift table in scope.
@@ -493,6 +515,29 @@ async function openSkuMovements(skuId, name, pointId) {
     <div class="foot"><button class="btn cancel" onclick="closeModal()">Закрыть</button></div>`);
 }
 
+// SE: switch to another point (connection moves automatically server-side)
+async function switchPointModal(current) {
+  const points = (await api('/points')).filter((p) => p.id !== current.id);
+  modal(`<h3>Сменить точку</h3>
+    <div class="muted" style="margin-bottom:14px">Вы отключитесь от «${esc(current.name)}» и подключитесь к выбранной точке.
+      Открытая смена останется на точке — её сможет закрыть напарник или администратор.</div>
+    ${points.length ? `<div class="grid">${points.map((p) => `
+      <div class="card click" data-sw="${p.id}" style="box-shadow:none">
+        <div class="row between"><b>${esc(p.name)}</b>${statusPill(p.shift_status)}</div>
+        <div class="muted" style="font-size:12px">${esc(p.address || '')} · SE: ${p.se_count}/${p.max_se}</div>
+      </div>`).join('')}</div>` : '<div class="empty">Других точек нет.</div>'}
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button></div>`,
+    (bg) => {
+      bg.querySelectorAll('[data-sw]').forEach((c) => c.onclick = async () => {
+        try {
+          await api(`/points/${c.dataset.sw}/connect`, { method: 'POST' });
+          closeModal(); toast('Вы подключены к новой точке', 'ok');
+          App.route = 'myshift'; renderShell();
+        } catch {}
+      });
+    }, 'wide');
+}
+
 function pointPicker(v, body) {
   api('/points').then((points) => {
     body.innerHTML = `<div class="section-title">Выберите торговую точку</div><div class="cards">
@@ -532,12 +577,19 @@ async function viewMyShift(v) {
   }
 
   const load = async () => {
-    const d = await api('/shifts/' + mine.shift_id);
+    const [d, cats] = await Promise.all([api('/shifts/' + mine.shift_id), getCategories()]);
     App.state.shiftId = d.shift.id;
     App.socket.emit('watch:point', d.shift.point_id);
     const t = d.totals;
     const needInv = d.shift.needs_inventory;
+    // admin-defined tabs: categories flagged as_tab get their own tab on the main page
+    const tabCats = cats.tabs.filter((name) => d.lines.some((l) => (l.category || '') === name));
+    const activeTab = tabCats.includes(App.state.seTab) ? App.state.seTab : '';
+    const shownLines = activeTab ? d.lines.filter((l) => (l.category || '') === activeTab)
+      : d.lines.filter((l) => !tabCats.includes(l.category || ''));
+    const countOf = (name) => d.lines.filter((l) => (l.category || '') === name).length;
     v.innerHTML = topbar('Моя смена', `
+      <button class="btn back sm" id="swPoint">Сменить точку</button>
       <button class="btn secondary sm" id="expBtn">Экспорт отчёта</button>
       <button class="btn ${needInv ? 'ok' : 'secondary'} sm" id="invBtn">${needInv ? '❗ Провести инвентаризацию' : 'Инвентаризация'}</button>
       <button class="btn dark sm" id="closeBtn">Закрыть смену</button>`);
@@ -555,16 +607,30 @@ async function viewMyShift(v) {
         </div>
       </div>
       ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
-      <div class="row" style="margin:18px 0 0"><input class="tbl-search" placeholder="Поиск по SKU…"></div>
+      <div class="row between wrap" style="margin:18px 0 0;gap:10px">
+        ${tabCats.length ? `<div class="se-tabs">
+          <button class="se-tab ${!activeTab ? 'on' : ''}" data-setab="">Основные</button>
+          ${tabCats.map((name) => `<button class="se-tab ${activeTab === name ? 'on' : ''}" data-setab="${esc(name)}">${esc(name)} · ${countOf(name)}</button>`).join('')}
+        </div>` : '<div></div>'}
+        <input class="tbl-search" placeholder="Поиск по SKU…">
+      </div>
       <div class="table-wrap" style="margin-top:12px">
         <table class="shift-table se-shift">
           <thead><tr><th>SKU</th><th class="num">Утренний остаток</th><th class="num">Продано</th><th class="num">Вечерний остаток</th></tr></thead>
-          <tbody>${seTableRows(d.lines, true)}</tbody>
+          <tbody>${seTableRows(shownLines, true)}</tbody>
         </table>
       </div>`;
+    // totals offsets for rows hidden by the active tab (so header stays correct)
+    const hidden = d.lines.filter((l) => !shownLines.includes(l));
+    const tbl = wrap.querySelector('.se-shift');
+    tbl.dataset.offSold = hidden.reduce((a, l) => a + l.sales_qty, 0);
+    tbl.dataset.offVal = hidden.reduce((a, l) => a + l.sales_value, 0);
+    tbl.dataset.offEve = hidden.reduce((a, l) => a + l.current, 0);
+    wrap.querySelectorAll('[data-setab]').forEach((b) => b.onclick = () => { App.state.seTab = b.dataset.setab || ''; load(); });
     const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
     const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
     const expBtn = $('#expBtn', v); if (expBtn) expBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.xlsx`, '_blank');
+    const swBtn = $('#swPoint', v); if (swBtn) swBtn.onclick = () => switchPointModal(mine);
     bindSeTable(wrap, d.shift.id);
     bindTableTools(wrap, d.shift.point_id);
   };
@@ -609,7 +675,10 @@ function rowEvening(tr) {
 }
 
 function recalcSeTotals(root) {
-  let soldQty = 0, soldVal = 0, evening = 0;
+  const tbl = root.querySelector('.se-shift');
+  let soldQty = Number(tbl && tbl.dataset.offSold) || 0;
+  let soldVal = Number(tbl && tbl.dataset.offVal) || 0;
+  let evening = Number(tbl && tbl.dataset.offEve) || 0;
   root.querySelectorAll('tr[data-sku]').forEach((tr) => {
     const sold = Number(tr.querySelector('.sold-input') ? tr.querySelector('.sold-input').value : 0) || 0;
     soldQty += sold; soldVal += sold * Number(tr.dataset.price); evening += rowEvening(tr);
@@ -681,6 +750,7 @@ async function viewArrival(v) {
   const mine = await getMyPoint();
   if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
   if (!mine.shift_id) { body.innerHTML = '<div class="empty">Сначала откройте смену во вкладке «Моя смена».</div>'; return; }
+  await getCategories();
   const d = await api('/shifts/' + mine.shift_id);
   body.innerHTML = `
     <div class="muted" style="margin-bottom:14px">Укажите, сколько товара поступило в точку. После сохранения приход добавится к утреннему остатку.</div>
@@ -940,6 +1010,7 @@ async function viewSeStock(v) {
     <div id="forecastOut"></div>`;
 
   const load = async () => {
+    await getCategories();
     const d = await api(`/point-stock-forecast/${mine.id}?${params()}`);
     const out = $('#forecastOut', v);
     const totalReorder = d.rows.reduce((a, r) => a + r.reorder, 0);
@@ -1381,14 +1452,16 @@ async function viewShift(v) {
     const canEdit = isOpen && App.user.role !== 'BRE';
     const t = d.totals;
     v.innerHTML = topbar(d.shift.point_name + ' · смена #' + d.shift.id,
-      `${canEdit ? `<button class="btn secondary sm" id="invBtn">Инвентаризация</button>` : ''}
+      `<button class="btn secondary sm" id="xlsBtn">Экспорт в Excel</button>
+       ${canEdit ? `<button class="btn secondary sm" id="invBtn">Инвентаризация</button>` : ''}
        ${canEdit ? `<button class="btn dark sm" id="closeBtn">Закрыть смену</button>` : ''}
        <button class="btn back sm" id="backBtn">Назад</button>`);
     const body = el('<div></div>'); v.appendChild(body);
     body.innerHTML = `
       <div class="row between wrap" style="margin-bottom:8px">
         <div>${statusPill(d.shift.status)} ${d.shift.needs_inventory ? '<span class="pill inv">Требуется инвентаризация</span>' : ''}</div>
-        <div class="muted">Открыта: ${fmtDate(d.shift.opened_at)} · ${emp(d.shift.opened_by_name)}</div>
+        <div class="muted">Открыта: ${fmtDate(d.shift.opened_at)} · ${emp(d.shift.opened_by_name)}
+          ${d.shift.status === 'closed' ? `<br>Закрыта: ${fmtDate(d.shift.closed_at)} · ${emp(d.shift.closed_by_name)}` : ''}</div>
       </div>
       <div class="kpis">
         ${kpi('Текущий остаток', num(t.current))}
@@ -1425,6 +1498,8 @@ async function viewShift(v) {
     // while a re-render is in flight, leaving document-scoped lookups null.
     const backBtn = $('#backBtn', v);
     if (backBtn) backBtn.onclick = () => { App.route = App.user.role === 'SE' ? (App.state.shiftFrom || 'shifthistory') : (App.state.shiftFrom || 'shifts'); App.state.shiftFrom = null; renderShell(); };
+    const xlsBtn = $('#xlsBtn', v);
+    if (xlsBtn) xlsBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.xlsx`, '_blank');
     if (canEdit) {
       const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
       const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
@@ -1682,9 +1757,11 @@ async function viewShifts(v) {
       <td>${statusPill(s.status)}${s.needs_inventory ? ' <span class="pill inv">инв.</span>' : ''}</td>
       <td>${fmtDate(s.opened_at)}</td><td>${s.closed_at ? fmtDate(s.closed_at) : '—'}</td>
       <td class="num"><button class="btn ghost sm" data-view="${s.id}">Открыть</button>
+      ${s.status === 'closed' ? `<button class="btn ghost sm" data-xls="${s.id}" title="Выгрузить в Excel">Excel</button>` : ''}
       ${isAdmin && s.status === 'closed' ? `<button class="btn ghost sm" data-reopen="${s.id}">Разблок.</button>` : ''}
       ${isAdmin && s.status === 'open' ? `<button class="btn ghost sm" data-force="${s.id}">Закрыть</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
   body.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => openShift(Number(b.dataset.view)));
+  body.querySelectorAll('[data-xls]').forEach((b) => b.onclick = () => window.open(`/api/shifts/${b.dataset.xls}/export.xlsx`, '_blank'));
   body.querySelectorAll('[data-reopen]').forEach((b) => b.onclick = async () => { try { await api(`/shifts/${b.dataset.reopen}/reopen`, { method: 'POST' }); toast('Смена разблокирована', 'ok'); viewShifts(v); } catch {} });
   body.querySelectorAll('[data-force]').forEach((b) => b.onclick = async () => { try { await api(`/shifts/${b.dataset.force}/force-close`, { method: 'POST' }); toast('Смена закрыта', 'ok'); viewShifts(v); } catch {} });
 }
@@ -1787,7 +1864,8 @@ async function viewMovements(v) {
 // ============================================================
 async function viewSkus(v) {
   v.innerHTML = topbar('Справочник SKU',
-    `<button class="btn secondary sm" id="tmpl">Шаблон</button>
+    `<button class="btn secondary sm" id="cats">Категории</button>
+     <button class="btn secondary sm" id="tmpl">Шаблон</button>
      <button class="btn secondary sm" id="imp">Импорт из файла</button>
      <button class="btn sm" id="add">+ SKU</button>`);
   bindBell();
@@ -1795,6 +1873,7 @@ async function viewSkus(v) {
   $('#add').onclick = () => skuForm();
   $('#tmpl').onclick = () => downloadSkuTemplate();
   $('#imp').onclick = () => importSkuFile(() => load());
+  $('#cats').onclick = () => categoriesModal();
   const load = async () => {
     const rows = await api('/skus?all=1');
     body.innerHTML = `<table><thead><tr><th>Название</th><th>Артикул</th><th>Категория</th><th class="num">Цена</th><th class="num">Мин. остаток</th><th>Статус</th><th></th></tr></thead>
@@ -1808,6 +1887,39 @@ async function viewSkus(v) {
     body.querySelectorAll('[data-hist]').forEach((b) => b.onclick = () => priceHistory(Number(b.dataset.hist)));
   };
   App._refresh = load; await load();
+}
+
+// admin: manage category order and which categories appear as SE main-page tabs
+async function categoriesModal() {
+  let cats = await api('/skus/categories');
+  const render = (bg) => {
+    $('#catList', bg).innerHTML = cats.map((c, i) => `
+      <div class="cat-item" data-i="${i}">
+        <span class="cat-name">${esc(c.name)}</span>
+        <label class="cat-tab-lbl"><input type="checkbox" data-tab="${i}" ${c.as_tab ? 'checked' : ''}> вкладка у SE</label>
+        <button class="btn ghost sm" data-up="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="btn ghost sm" data-down="${i}" ${i === cats.length - 1 ? 'disabled' : ''}>↓</button>
+      </div>`).join('');
+    bg.querySelectorAll('[data-up]').forEach((b) => b.onclick = () => { const i = +b.dataset.up; [cats[i - 1], cats[i]] = [cats[i], cats[i - 1]]; render(bg); });
+    bg.querySelectorAll('[data-down]').forEach((b) => b.onclick = () => { const i = +b.dataset.down; [cats[i], cats[i + 1]] = [cats[i + 1], cats[i]]; render(bg); });
+    bg.querySelectorAll('[data-tab]').forEach((cb) => cb.onchange = () => { cats[+cb.dataset.tab].as_tab = cb.checked ? 1 : 0; });
+  };
+  modal(`<h3>Категории SKU</h3>
+    <div class="muted" style="margin-bottom:14px">Порядок определяет расположение на главной SE (сверху вниз).
+      «Вкладка у SE» выносит категорию в отдельную вкладку (например, «Девайсы для замены», «Тест-драйв 14 дней»).</div>
+    <div id="catList"></div>
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okCats">Сохранить</button></div>`,
+    (bg) => {
+      render(bg);
+      $('#okCats', bg).onclick = async () => {
+        const payload = cats.map((c, i) => ({ name: c.name, sort_order: i, as_tab: c.as_tab ? 1 : 0 }));
+        try {
+          await api('/skus/categories', { method: 'PUT', body: { categories: payload } });
+          App.state.catOrder = null;
+          closeModal(); toast('Категории сохранены', 'ok');
+        } catch {}
+      };
+    });
 }
 
 // download an importable SKU template (CSV with headers + example)
