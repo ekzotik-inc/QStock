@@ -68,9 +68,48 @@ router.post('/perform', authRequired, requireRole('SE', 'ADMIN'), (req, res) => 
   const invId = tx();
   audit({ userId: req.user.id, action: 'inventory_perform', entity: 'inventory',
     newValue: { inventory_id: invId, point_id: shift.point_id }, ip: req.ip });
+  // notify the point's BRE (and admins) with the results summary
+  const point = db.prepare('SELECT * FROM points WHERE id=?').get(shift.point_id);
+  const invItems = db.prepare('SELECT old_qty, new_qty FROM inventory_items WHERE inventory_id=?').all(invId);
+  const diffs = invItems.filter((i) => Number(i.old_qty) !== Number(i.new_qty)).length;
+  const payload = {
+    inventory_id: invId, point_id: shift.point_id, point_name: point.name,
+    by: req.user.full_name, items: invItems.length, diffs,
+  };
+  const targets = new Set();
+  if (point.bre_id) targets.add(point.bre_id);
+  for (const a of db.prepare("SELECT id FROM users WHERE role='ADMIN' AND status='active'").all()) targets.add(a.id);
+  for (const uid of targets) { notify(uid, 'inventory_done', payload); rt.emitUser(uid, 'notification', { type: 'inventory_done', payload }); }
   rt.emitPoint(shift.point_id, 'point:changed', { pointId: shift.point_id });
   rt.emitPoint(shift.point_id, 'shift:changed', { pointId: shift.point_id, shiftId: shift.id });
-  res.json({ ok: true, inventory_id: invId });
+  res.json({ ok: true, inventory_id: invId, diffs });
+});
+
+// inventory history across all visible points (optional point_id filter)
+router.get('/history', authRequired, (req, res) => {
+  let ids;
+  if (req.user.role === 'SE') {
+    const c = db.prepare('SELECT point_id FROM point_se WHERE se_id=?').get(req.user.id);
+    ids = c ? [c.point_id] : [];
+  } else {
+    const { visiblePointIds } = require('../access');
+    ids = visiblePointIds(req.user);
+    const pf = Number(req.query.point_id) || null;
+    if (pf) ids = ids.filter((i) => i === pf);
+  }
+  if (!ids.length) return res.json([]);
+  const invs = db.prepare(
+    `SELECT i.*, u.full_name AS user_name, p.name AS point_name
+     FROM inventories i LEFT JOIN users u ON u.id=i.user_id JOIN points p ON p.id=i.point_id
+     WHERE i.point_id IN (${ids.map(() => '?').join(',')}) ORDER BY i.id DESC LIMIT 100`
+  ).all(...ids);
+  for (const inv of invs) {
+    inv.items = db.prepare(
+      `SELECT ii.*, s.name, s.article FROM inventory_items ii JOIN skus s ON s.id=ii.sku_id WHERE ii.inventory_id=?`
+    ).all(inv.id);
+    inv.diffs = inv.items.filter((i) => Number(i.old_qty) !== Number(i.new_qty)).length;
+  }
+  res.json(invs);
 });
 
 // inventory history for a point

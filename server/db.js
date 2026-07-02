@@ -201,9 +201,30 @@ CREATE TABLE IF NOT EXISTS notes (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS point_tasks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  point_id    INTEGER NOT NULL REFERENCES points(id),
+  title       TEXT NOT NULL,
+  importance  TEXT NOT NULL DEFAULT 'normal' CHECK(importance IN ('low','normal','high')),
+  status      TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_progress','done')),
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS task_comments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    INTEGER NOT NULL REFERENCES point_tasks(id) ON DELETE CASCADE,
+  user_id    INTEGER REFERENCES users(id),
+  text       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_requests_point ON stock_requests(point_id, status);
 CREATE INDEX IF NOT EXISTS idx_notes_point ON notes(point_id, pinned, id);
+CREATE INDEX IF NOT EXISTS idx_tasks_point ON point_tasks(point_id, status);
+CREATE INDEX IF NOT EXISTS idx_task_comments ON task_comments(task_id);
 `);
 
 // --- lightweight migrations (add columns if missing) ---

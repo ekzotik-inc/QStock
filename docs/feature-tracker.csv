@@ -114,3 +114,11 @@ BRE-01,BRE,BRE/ADMIN,Point live monitor — current sales situation,viewPointMon
 BRE-02,BRE,BRE/ADMIN,Закуп — procurement calc across all points,GET /procurement + /procurement/export.xlsx; per-point tables sorted by urgency,Verified,PASS,
 BRE-03,BRE,BRE/ADMIN,Critical low stock highlighted (везти срочно),crit-badge pulse on point cards/dashboard/procurement; critical = stock <= lead days,Verified,PASS,
 BRE-04,BRE,BRE,BRE has its own focused nav,Дашборд/Мои точки/Закуп/Заявки/Смены/Аналитика/Движение SKU,Verified,PASS,
+TASK-01,Tasks,BRE/ADMIN,Assign tasks to a point with importance,POST /tasks; SE notified (task_new),Verified,PASS,
+TASK-02,Tasks,SE,SE sees point tasks, changes status, comments,GET/PUT /tasks + comments; managers notified who/when,Verified,PASS,
+TASK-03,Tasks,All,Task comments show author name+time in chat bubbles,task_comments with user_name/role; SE/mgr bubble styles,Verified,PASS,
+NTF-05,Notifications,All,Cross-role notifications: tasks/comments/status/inventory_done,notify + realtime emitUser; bell + toasts,Verified,PASS,
+INV-08,Inventory,SE,Prominent "Провести инвентаризацию" button when assigned,Моя смена topbar + Инвентаризация tab banner,Verified,PASS,Was inverted/hidden before
+INV-09,Inventory,BRE,BRE gets inventory_done notification with results,notify with items/diffs summary,Verified,PASS,
+INV-10,Inventory,SE/BRE,Inventory history tab (one point / all points),GET /inventory/history?point_id; expandable diffs table,Verified,PASS,
+LOG-01,Logs,All,Filter logs/movements by operation type,SE Логи action filter; Движение SKU type filter,Verified,PASS,

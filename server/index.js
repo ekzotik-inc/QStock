@@ -18,6 +18,7 @@ const { router: inventoryRoutes } = require('./routes/inventory');
 const analyticsRoutes = require('./routes/analytics');
 const requestsRoutes = require('./routes/requests');
 const notesRoutes = require('./routes/notes');
+const tasksRoutes = require('./routes/tasks');
 const miscRoutes = require('./routes/misc');
 
 const app = express();
@@ -51,6 +52,7 @@ app.use('/api/inventory', authRequired, inventoryRoutes);
 app.use('/api/analytics', authRequired, analyticsRoutes);
 app.use('/api/requests', authRequired, requestsRoutes);
 app.use('/api/notes', authRequired, notesRoutes);
+app.use('/api/tasks', authRequired, tasksRoutes);
 app.use('/api', authRequired, miscRoutes);
 
 // --- static frontend ---

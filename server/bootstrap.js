@@ -111,6 +111,11 @@ function seedDemoCompass(bre) {
       }
     }
 
+    // today's team is connected to the point
+    const todayIdx = 13;
+    const todayTeam = teams[Math.floor(todayIdx / 2) % 2];
+    for (const u of todayTeam) db.prepare('INSERT OR IGNORE INTO point_se (point_id, se_id) VALUES (?, ?)').run(pid, u.id);
+
     // stock requests (на сегодняшнюю открытую смену)
     const sku0 = skus[0], sku1 = skus[2] || skus[0];
     const reqs = [

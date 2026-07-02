@@ -392,6 +392,29 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 .crit-row td { background: var(--danger-weak); }
 .card.point-crit { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger-weak), var(--shadow-sm); }
 
+/* ---------- Tasks ---------- */
+.tasks-list { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.task-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px;
+  box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 10px; border-left: 4px solid var(--line-strong);
+  animation: fadeIn .3s var(--ease) both; }
+.task-card.imp-high { border-left-color: var(--danger); }
+.task-card.imp-normal { border-left-color: var(--accent); }
+.task-card.imp-low { border-left-color: var(--ink-soft); }
+.task-card.is-done { opacity: .65; }
+.task-card.is-done .task-title { text-decoration: line-through; text-decoration-color: var(--line-strong); }
+.task-title { font-size: 16px; font-weight: 700; line-height: 1.4; }
+.task-comments { border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 4px; }
+.cmt { padding: 10px 14px; border-radius: 14px; margin-bottom: 8px; max-width: 92%; }
+.cmt-se { background: var(--accent-weak); border-bottom-left-radius: 4px; }
+.cmt-mgr { background: var(--surface-2); margin-left: auto; border-bottom-right-radius: 4px; }
+.cmt-meta { font-size: 12px; margin-bottom: 3px; }
+.cmt-text { font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.cmt-input { flex: 1; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 999px;
+  font-size: 14px; background: var(--surface); color: var(--ink); outline: none; }
+.cmt-input:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.cmt-send svg { width: 15px; height: 15px; }
+.inv-card .closed-toggle.open { color: var(--ink); }
+
 /* employee name highlight (IQOS turquoise, premium) */
 .emp { color: var(--mint); font-weight: 700; letter-spacing: .1px; }
 

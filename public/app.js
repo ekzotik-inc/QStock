@@ -89,7 +89,7 @@ function connectSocket() {
     if ((n.type === 'request_new' || n.type === 'request_decided') &&
         (App.route === 'approvals' || App.route === 'writeoff' || App.route === 'myshift') && App._refresh) App._refresh();
   });
-  ['stock:update', 'sale:new', 'shift:changed', 'point:changed', 'sku:changed', 'notes:changed'].forEach((ev) => {
+  ['stock:update', 'sale:new', 'shift:changed', 'point:changed', 'sku:changed', 'notes:changed', 'tasks:changed'].forEach((ev) => {
     App.socket.on(ev, (data) => handleRealtime(ev, data));
   });
 }
@@ -115,6 +115,11 @@ function handleRealtime(ev, data) {
     const editing = document.activeElement && document.activeElement.id === 'noteText';
     if (!editing) App._refresh();
   }
+  if ((App.route === 'setasks' || App.route === 'tasksmgr') && ev === 'tasks:changed' && App._refresh) {
+    const typing = document.activeElement && (document.activeElement.classList.contains('cmt-input') || document.activeElement.id === 'taskTitle');
+    if (!typing) App._refresh();
+  }
+  if ((App.route === 'seinv' || App.route === 'invhistory') && (ev === 'point:changed' || ev === 'shift:changed') && App._refresh) App._refresh();
 }
 
 // ---------- login ----------
@@ -159,6 +164,8 @@ function navItems() {
       ['myshift', 'Моя смена'],
       ['arrival', 'Новое поступление'],
       ['writeoff', 'Списание / возврат'],
+      ['setasks', 'Задачи на точку'],
+      ['seinv', 'Инвентаризация'],
       ['sestock', 'Запасы в точке'],
       ['notes', 'Заметки'],
       ['shifthistory', 'История смен'],
@@ -169,8 +176,10 @@ function navItems() {
     return [
       ['dashboard', 'Дашборд'],
       ['points', 'Мои точки'],
+      ['tasksmgr', 'Задачи'],
       ['procurement', 'Закуп'],
       ['approvals', 'Заявки'],
+      ['invhistory', 'Инвентаризации'],
       ['shifts', 'Смены'],
       ['analytics', 'Аналитика'],
       ['movements', 'Движение SKU'],
@@ -180,15 +189,17 @@ function navItems() {
   return [
     ['dashboard', 'Дашборд'],
     ['points', 'Торговые точки'],
+    ['tasksmgr', 'Задачи'],
     ['procurement', 'Закуп'],
     ['approvals', 'Заявки'],
+    ['invhistory', 'Инвентаризации'],
     ['shifts', 'Смены'],
     ['analytics', 'Аналитика'],
     ['kpi', 'KPI'],
     ['movements', 'Движение SKU'],
     ['skus', 'SKU'],
     ['users', 'Пользователи'],
-    ['schedules', 'Инвентаризации'],
+    ['schedules', 'Планы инвентаризаций'],
     ['audit', 'Журнал'],
   ];
 }
@@ -265,6 +276,10 @@ const ICON = {
   rows: SVG('<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/>'),
   send: SVG('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>'),
   procurement: SVG('<circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/><path d="M2 3h3l2.6 12.5a2 2 0 0 0 2 1.5h8.9a2 2 0 0 0 2-1.6L22 7H6"/>'),
+  setasks: SVG('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 5l1 1 2-2M4 11l1 1 2-2M4 17l1 1 2-2"/>'),
+  tasksmgr: SVG('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 5l1 1 2-2M4 11l1 1 2-2M4 17l1 1 2-2"/>'),
+  seinv: SVG('<path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 12l2.5 2.5L16 9"/>'),
+  invhistory: SVG('<path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 12l2.5 2.5L16 9"/>'),
 };
 const navIcon = (route) => ICON[route] || ICON.dashboard;
 
@@ -308,6 +323,10 @@ function notifText(type, p = {}) {
     case 'inventory_assigned': return `Назначена инвентаризация на точке #${p.point_id}`;
     case 'request_new': return `Заявка на ${p.type === 'return' ? 'возврат' : 'списание'}: ${p.sku_name || ''} ×${num(p.qty)} — «${p.point_name || ''}»`;
     case 'request_decided': return `Заявка на ${p.type === 'return' ? 'возврат' : 'списание'} ${p.sku_name || ''}: ${p.approved ? 'одобрена' : 'отклонена'}`;
+    case 'task_new': return `Новая задача от ${p.by || ''}: «${p.title || ''}»${p.importance === 'high' ? ' (важная!)' : ''}`;
+    case 'task_status': return `Задача «${p.title || ''}»: статус — ${{ open: 'открыта', in_progress: 'в работе', done: 'выполнена' }[p.status] || p.status} (${p.by || ''})`;
+    case 'task_comment': return `${p.by || ''} — комментарий к задаче «${p.title || ''}»: ${p.text || ''}`;
+    case 'inventory_done': return `Инвентаризация на «${p.point_name || ''}» завершена (${p.by || ''}): позиций ${p.items}, расхождений ${p.diffs}`;
     default: return type;
   }
 }
@@ -325,6 +344,8 @@ function renderRoute() {
     notes: viewNotes, shifthistory: viewShiftHistory, selogs: viewSeLogs,
     // BRE/ADMIN approvals + point monitor + procurement
     approvals: viewApprovals, pointmon: viewPointMonitor, procurement: viewProcurement,
+    // tasks + inventory history
+    setasks: viewTasks, tasksmgr: viewTasks, seinv: viewInvHistory, invhistory: viewInvHistory,
   };
   const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
   const fn = routes[App.route] || fallback;
@@ -518,7 +539,7 @@ async function viewMyShift(v) {
     const needInv = d.shift.needs_inventory;
     v.innerHTML = topbar('Моя смена', `
       <button class="btn secondary sm" id="expBtn">Экспорт отчёта</button>
-      ${needInv ? '' : '<button class="btn secondary sm" id="invBtn">Инвентаризация</button>'}
+      <button class="btn ${needInv ? 'ok' : 'secondary'} sm" id="invBtn">${needInv ? '❗ Провести инвентаризацию' : 'Инвентаризация'}</button>
       <button class="btn dark sm" id="closeBtn">Закрыть смену</button>`);
     const wrap = el('<div class="fade-in"></div>'); v.appendChild(wrap);
     wrap.innerHTML = `
@@ -1003,13 +1024,23 @@ async function viewSeLogs(v) {
   if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
   const logs = await api(`/point-logs/${mine.id}`);
   if (!logs.length) { body.innerHTML = '<div class="empty">Записей пока нет.</div>'; return; }
-  body.innerHTML = `<div class="table-wrap"><table>
+  const actions = [...new Set(logs.map((l) => l.action))];
+  body.innerHTML = `
+    <div class="filters"><div class="field"><label>Действие</label><select id="logFilter">
+      <option value="">Все действия</option>
+      ${actions.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
+    </select></div></div>
+    <div class="table-wrap"><table>
     <thead><tr><th>Время</th><th>Сотрудник</th><th>Действие</th><th>SKU</th><th class="num">Кол-во</th><th class="num">Остаток</th></tr></thead>
-    <tbody>${logs.map((l) => `<tr>
+    <tbody>${logs.map((l) => `<tr data-action="${esc(l.action)}">
       <td>${fmtDate(l.created_at)}</td><td>${emp(l.user_name)}</td><td>${esc(l.action)}</td>
       <td>${esc(l.sku_name || '')}</td><td class="num">${l.qty == null ? '' : num(l.qty)}</td>
       <td class="num">${l.balance_after == null ? '' : num(l.balance_after)}</td></tr>`).join('')}</tbody>
   </table></div>`;
+  $('#logFilter', body).onchange = (e) => {
+    const val = e.target.value;
+    body.querySelectorAll('tr[data-action]').forEach((tr) => tr.style.display = (!val || tr.dataset.action === val) ? '' : 'none');
+  };
 }
 
 // ---- Заметки 📎 ----
@@ -1160,6 +1191,178 @@ function bindNoteCard(cardEl, reload) {
     cardEl.classList.add('leaving');
     try { await api(`/notes/${id}`, { method: 'DELETE' }); setTimeout(reload, 180); } catch { reload(); }
   };
+}
+
+// ---- Задачи на точку (SE видит свою точку; BRE/Admin назначают) ----
+const TASK_STATUS = { open: 'Открыта', in_progress: 'В работе', done: 'Выполнена' };
+
+async function viewTasks(v) {
+  const isMgr = App.user.role !== 'SE';
+  v.innerHTML = topbar(isMgr ? 'Задачи по точкам' : 'Задачи на точку');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+
+  let mine = null, myPoints = [];
+  if (!isMgr) {
+    mine = await getMyPoint();
+    if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+    App.socket.emit('watch:point', mine.id);
+  } else {
+    myPoints = await api('/points');
+    myPoints.forEach((p) => App.socket.emit('watch:point', p.id));
+  }
+
+  const load = async () => {
+    const tasks = await api('/tasks' + (isMgr && App.state.taskPoint ? `?point_id=${App.state.taskPoint}` : ''));
+    const active = tasks.filter((t) => t.status !== 'done');
+    const done = tasks.filter((t) => t.status === 'done');
+    body.innerHTML = `
+      ${isMgr ? `
+      <div class="card" style="max-width:680px;margin-bottom:20px">
+        <h3>Новая задача</h3>
+        <div class="field" style="margin-top:12px"><label>Точка</label><select id="taskPointSel">
+          ${myPoints.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Задача</label><input id="taskTitle" placeholder="Что нужно сделать на точке…"></div>
+        <div class="row between wrap">
+          <div class="seg-field"><span class="seg-label">Важность</span>
+            ${segmented('timp', [{ val: 'low', label: 'Низкая' }, { val: 'normal', label: 'Обычная' }, { val: 'high', label: 'Высокая' }], 'normal', 'sm')}</div>
+          <button class="btn ok" id="taskAdd">Назначить задачу</button>
+        </div>
+      </div>
+      <div class="filters"><div class="field"><label>Показать точку</label><select id="taskFilter">
+        <option value="">Все точки</option>
+        ${myPoints.map((p) => `<option value="${p.id}" ${App.state.taskPoint == p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+      </select></div></div>` : ''}
+      <div class="section-title">Активные · ${active.length}</div>
+      <div class="tasks-list">${active.length ? active.map((t) => taskCard(t, isMgr)).join('') : '<div class="empty">Активных задач нет.</div>'}</div>
+      ${done.length ? `<div class="notes-section">
+        <button class="closed-toggle ${App.state.tasksShowDone ? 'open' : ''}" id="doneToggle">▾ Выполненные · ${done.length}</button>
+        <div class="tasks-list" id="doneBox" style="${App.state.tasksShowDone ? '' : 'display:none'};margin-top:12px">${done.map((t) => taskCard(t, isMgr)).join('')}</div>
+      </div>` : ''}`;
+
+    if (isMgr) {
+      const seg = body.querySelector('.segmented[data-seg="timp"]');
+      seg.querySelectorAll('.seg-opt').forEach((b) => b.onclick = () => { seg.querySelectorAll('.seg-opt').forEach((x) => x.classList.remove('on')); b.classList.add('on'); });
+      $('#taskAdd', body).onclick = async () => {
+        const title = $('#taskTitle', body).value;
+        if (!title.trim()) return toast('Опишите задачу', 'warn');
+        try {
+          await api('/tasks', { method: 'POST', body: { point_id: Number($('#taskPointSel', body).value), title, importance: segValue(body, 'timp') || 'normal' } });
+          toast('Задача назначена', 'ok'); load();
+        } catch {}
+      };
+      $('#taskTitle', body).addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#taskAdd', body).click(); });
+      $('#taskFilter', body).onchange = (e) => { App.state.taskPoint = e.target.value || null; load(); };
+    }
+    const dt = $('#doneToggle', body);
+    if (dt) dt.onclick = () => { App.state.tasksShowDone = !App.state.tasksShowDone; dt.classList.toggle('open'); $('#doneBox', body).style.display = App.state.tasksShowDone ? '' : 'none'; };
+    body.querySelectorAll('[data-task]').forEach((card) => bindTaskCard(card, load));
+  };
+  App._refresh = load; await load();
+}
+
+function taskCard(t, isMgr) {
+  return `<div class="task-card imp-${t.importance} ${t.status === 'done' ? 'is-done' : ''}" data-task="${t.id}">
+    <div class="row between wrap" style="gap:8px">
+      <div class="row wrap" style="gap:6px">
+        <span class="pill imp-pill ${t.importance}">${NOTE_IMP[t.importance]}</span>
+        ${isMgr ? `<span class="pill closed">${esc(t.point_name)}</span>` : ''}
+      </div>
+      ${segmented('tstatus', [{ val: 'open', label: 'Открыта' }, { val: 'in_progress', label: 'В работе' }, { val: 'done', label: 'Готово' }], t.status, 'sm card-status')}
+    </div>
+    <div class="task-title">${esc(t.title)}</div>
+    <div class="muted" style="font-size:12px">Назначил: ${emp(t.created_by_name)} · ${fmtDate(t.created_at)}</div>
+    <div class="task-comments">
+      ${t.comments.map((c) => `<div class="cmt ${c.user_role === 'SE' ? 'cmt-se' : 'cmt-mgr'}">
+        <div class="cmt-meta">${emp(c.user_name)} <span class="muted">· ${fmtDate(c.created_at)}</span></div>
+        <div class="cmt-text">${esc(c.text)}</div>
+      </div>`).join('')}
+      <div class="row" style="gap:8px;margin-top:${t.comments.length ? '10px' : '0'}">
+        <input class="cmt-input" placeholder="Комментарий… (Enter — отправить)">
+        <button class="btn sm cmt-send">${ICON.send}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindTaskCard(card, reload) {
+  const id = card.dataset.task;
+  card.querySelectorAll('.card-status .seg-opt').forEach((b) => b.onclick = async () => {
+    if (b.classList.contains('on')) return;
+    try { await api(`/tasks/${id}`, { method: 'PUT', body: { status: b.dataset.val } }); reload(); } catch {}
+  });
+  const inp = card.querySelector('.cmt-input');
+  const send = async () => {
+    const text = inp.value;
+    if (!text.trim()) return;
+    try { await api(`/tasks/${id}/comments`, { method: 'POST', body: { text } }); reload(); } catch {}
+  };
+  card.querySelector('.cmt-send').onclick = send;
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+}
+
+// ---- Инвентаризация: история (SE — своя точка; BRE/Admin — все свои) ----
+async function viewInvHistory(v) {
+  const isMgr = App.user.role !== 'SE';
+  v.innerHTML = topbar('Инвентаризация');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  let mine = null, myPoints = [];
+  if (!isMgr) {
+    mine = await getMyPoint();
+    if (!mine) { body.innerHTML = '<div class="empty">Сначала выберите точку во вкладке «Моя смена».</div>'; return; }
+  } else {
+    myPoints = await api('/points');
+  }
+
+  const load = async () => {
+    const q = isMgr && App.state.invPoint ? `?point_id=${App.state.invPoint}` : '';
+    const invs = await api('/inventory/history' + q);
+    let needBlock = '';
+    if (!isMgr) {
+      const p = await api('/points/' + mine.id);
+      if (p.needs_inventory && p.shift_id) {
+        needBlock = `<div class="card banner-warn" style="margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div><b>Назначена инвентаризация.</b> Пересчитайте фактические остатки — до этого смену закрыть нельзя.</div>
+          <button class="btn ok" id="doInvNow">Провести инвентаризацию</button>
+        </div>`;
+      }
+    }
+    body.innerHTML = `
+      ${needBlock}
+      ${isMgr ? `<div class="filters"><div class="field"><label>Точка</label><select id="invFilter">
+        <option value="">Все точки</option>
+        ${myPoints.map((p) => `<option value="${p.id}" ${App.state.invPoint == p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+      </select></div></div>` : ''}
+      <div class="section-title">История инвентаризаций · ${invs.length}</div>
+      ${invs.length ? invs.map((inv) => `
+        <div class="card inv-card" style="margin-bottom:14px">
+          <div class="row between wrap" style="gap:8px">
+            <div><b>${fmtDate(inv.created_at)}</b>${isMgr ? ` · <span class="pill closed">${esc(inv.point_name)}</span>` : ''}
+              · провёл: ${emp(inv.user_name)}</div>
+            <div>${inv.diffs ? `<span class="pill danger">расхождений: ${inv.diffs}</span>` : '<span class="pill open">без расхождений</span>'}</div>
+          </div>
+          <button class="closed-toggle" data-invtoggle style="margin-top:8px">▾ Детали (${inv.items.length} SKU)</button>
+          <div class="table-wrap" data-invbox style="display:none;margin-top:10px">
+            <table><thead><tr><th>SKU</th><th class="num">Было (расчёт)</th><th class="num">Факт</th><th class="num">Разница</th></tr></thead>
+            <tbody>${inv.items.map((it) => {
+              const d = Number(it.new_qty) - Number(it.old_qty);
+              return `<tr><td>${esc(it.name)}</td><td class="num">${num(it.old_qty)}</td><td class="num"><b>${num(it.new_qty)}</b></td>
+                <td class="num" style="color:${d === 0 ? 'inherit' : d > 0 ? 'var(--ok)' : 'var(--danger)'}">${d > 0 ? '+' : ''}${num(d)}</td></tr>`;
+            }).join('')}</tbody></table>
+          </div>
+        </div>`).join('') : '<div class="empty">Инвентаризаций пока не было.</div>'}`;
+    const invBtn = $('#doInvNow', body);
+    if (invBtn) invBtn.onclick = async () => { const d = await api('/shifts/' + (await api('/points/' + mine.id)).shift_id); doInventory(d); };
+    const flt = $('#invFilter', body);
+    if (flt) flt.onchange = (e) => { App.state.invPoint = e.target.value || null; load(); };
+    body.querySelectorAll('[data-invtoggle]').forEach((btn) => btn.onclick = () => {
+      const box = btn.parentElement.querySelector('[data-invbox]');
+      const open = box.style.display !== 'none';
+      box.style.display = open ? 'none' : ''; btn.classList.toggle('open', !open);
+    });
+  };
+  App._refresh = load; await load();
 }
 
 // ============================================================
@@ -1557,19 +1760,26 @@ async function viewMovements(v) {
   v.innerHTML = topbar('Движение SKU');
   bindBell();
   const skus = await api('/skus?all=' + (App.user.role === 'ADMIN' ? '1' : '0')).catch(() => api('/skus'));
-  const f = el(`<div class="filters"><div class="field"><label>SKU</label><select id="ms"><option value="">Все</option>${skus.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
+  const opLabel = { opening: 'Нач. остаток', carryover: 'Перенос', sale: 'Продажа', income: 'Приход', writeoff: 'Списание', adjustment: 'Корректировка', inventory: 'Инвентаризация', admin_edit: 'Правка админа' };
+  const f = el(`<div class="filters">
+    <div class="field"><label>SKU</label><select id="ms"><option value="">Все</option>${skus.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Операция</label><select id="mt"><option value="">Все операции</option>
+      ${Object.entries(opLabel).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
     <button class="btn sm" id="apply">Показать</button></div>`);
   v.appendChild(f);
   const body = el('<div class="card" style="padding:0;overflow:auto"></div>'); v.appendChild(body);
-  const opLabel = { opening: 'Нач. остаток', carryover: 'Перенос', sale: 'Продажа', income: 'Приход', writeoff: 'Списание', adjustment: 'Корректировка', inventory: 'Инвентаризация', admin_edit: 'Правка админа' };
   const load = async () => {
-    const q = new URLSearchParams(); if ($('#ms').value) q.set('sku_id', $('#ms').value);
+    const q = new URLSearchParams();
+    if ($('#ms').value) q.set('sku_id', $('#ms').value);
+    if ($('#mt').value) q.set('type', $('#mt').value);
     const rows = await api('/movements?' + q.toString());
     body.innerHTML = `<table><thead><tr><th>Дата</th><th>Точка</th><th>SKU</th><th>Операция</th><th class="num">Кол-во</th><th class="num">Остаток после</th><th>Пользователь</th></tr></thead>
       <tbody>${rows.map((m) => `<tr><td>${fmtDate(m.created_at)}</td><td>${esc(m.point_name)}</td><td>${esc(m.sku_name)}</td>
         <td>${opLabel[m.type] || m.type}</td><td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${emp(m.user_name)}</td></tr>`).join('') || '<tr><td colspan=7 class="empty">Нет данных</td></tr>'}</tbody></table>`;
   };
-  $('#apply').onclick = load; await load();
+  $('#apply').onclick = load;
+  $('#mt').onchange = load; $('#ms').onchange = load;
+  await load();
 }
 
 // ============================================================
