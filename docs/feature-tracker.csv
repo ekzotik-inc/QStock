@@ -111,3 +111,6 @@ UX-11,UX,All,Employee names highlighted in IQOS turquoise everywhere,emp() helpe
 DEMO-01,Demo,All,Compass demo point with 14 days of data,bootstrap seedDemoCompass: 4 SE (2/2), shifts/movements/sales/requests/notes,Verified,PASS,nikita/georgiy/anna/milana
 ADM-01,Admin,ADMIN,Import SKUs & prices from a file template,POST /skus/import; CSV template download + upload with upsert & price history,Verified,PASS,
 BRE-01,BRE,BRE/ADMIN,Point live monitor — current sales situation,viewPointMonitor: KPIs, top sales, shift totals, live activity; realtime,Verified,PASS,
+BRE-02,BRE,BRE/ADMIN,Закуп — procurement calc across all points,GET /procurement + /procurement/export.xlsx; per-point tables sorted by urgency,Verified,PASS,
+BRE-03,BRE,BRE/ADMIN,Critical low stock highlighted (везти срочно),crit-badge pulse on point cards/dashboard/procurement; critical = stock <= lead days,Verified,PASS,
+BRE-04,BRE,BRE,BRE has its own focused nav,Дашборд/Мои точки/Закуп/Заявки/Смены/Аналитика/Движение SKU,Verified,PASS,

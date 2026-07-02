@@ -154,16 +154,32 @@ function navItems() {
       ['selogs', 'Логи'],
     ];
   }
-  const items = [];
-  if (r === 'ADMIN' || r === 'BRE') items.push(['dashboard', 'Дашборд']);
-  if (r === 'ADMIN' || r === 'BRE') items.push(['points', 'Торговые точки']);
-  if (r === 'ADMIN' || r === 'BRE') items.push(['approvals', 'Заявки']);
-  items.push(['shifts', 'Смены']);
-  if (r === 'ADMIN' || r === 'BRE') items.push(['analytics', 'Аналитика']);
-  if (r === 'ADMIN' || r === 'BRE') items.push(['kpi', 'KPI']);
-  items.push(['movements', 'Движение SKU']);
-  if (r === 'ADMIN') { items.push(['skus', 'SKU']); items.push(['users', 'Пользователи']); items.push(['schedules', 'Инвентаризации']); items.push(['audit', 'Журнал']); }
-  return items;
+  if (r === 'BRE') {
+    return [
+      ['dashboard', 'Дашборд'],
+      ['points', 'Мои точки'],
+      ['procurement', 'Закуп'],
+      ['approvals', 'Заявки'],
+      ['shifts', 'Смены'],
+      ['analytics', 'Аналитика'],
+      ['movements', 'Движение SKU'],
+    ];
+  }
+  // ADMIN
+  return [
+    ['dashboard', 'Дашборд'],
+    ['points', 'Торговые точки'],
+    ['procurement', 'Закуп'],
+    ['approvals', 'Заявки'],
+    ['shifts', 'Смены'],
+    ['analytics', 'Аналитика'],
+    ['kpi', 'KPI'],
+    ['movements', 'Движение SKU'],
+    ['skus', 'SKU'],
+    ['users', 'Пользователи'],
+    ['schedules', 'Инвентаризации'],
+    ['audit', 'Журнал'],
+  ];
 }
 
 // Detail routes that are reachable without a sidebar nav entry.
@@ -237,6 +253,7 @@ const ICON = {
   grid: SVG('<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/>'),
   rows: SVG('<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/>'),
   send: SVG('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>'),
+  procurement: SVG('<circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/><path d="M2 3h3l2.6 12.5a2 2 0 0 0 2 1.5h8.9a2 2 0 0 0 2-1.6L22 7H6"/>'),
 };
 const navIcon = (route) => ICON[route] || ICON.dashboard;
 
@@ -295,8 +312,8 @@ function renderRoute() {
     // SE cabinet
     myshift: viewMyShift, arrival: viewArrival, writeoff: viewWriteoff, sestock: viewSeStock,
     notes: viewNotes, shifthistory: viewShiftHistory, selogs: viewSeLogs,
-    // BRE/ADMIN approvals + point monitor
-    approvals: viewApprovals, pointmon: viewPointMonitor,
+    // BRE/ADMIN approvals + point monitor + procurement
+    approvals: viewApprovals, pointmon: viewPointMonitor, procurement: viewProcurement,
   };
   const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
   (routes[App.route] || fallback)(v);
@@ -321,9 +338,10 @@ async function viewDashboard(v) {
         ${kpi('Сумма продаж', money(d.widgets.sales_value), true)}
         ${kpi('Стоимость остатков', money(d.widgets.stock_value), true)}
       </div>
-      ${d.low_stock.length ? `<div class="card" style="border-color:var(--danger)">
-        <h3>⚠️ Критически низкий остаток</h3>
-        ${d.low_stock.map((l) => `<div class="stat-line"><span>${esc(l.point_name)} · ${esc(l.sku_name)}</span><b>${num(l.current)} / мин ${num(l.min_stock)}</b></div>`).join('')}
+      ${d.low_stock.length ? `<div class="card point-crit">
+        <div class="row between wrap"><h3 style="margin:0">⚠️ Критически низкий остаток <span class="crit-badge">везти срочно · ${d.low_stock.length}</span></h3>
+          <button class="btn sm" id="goProc">Рассчитать закуп</button></div>
+        <div style="margin-top:10px">${d.low_stock.map((l) => `<div class="stat-line"><span><b>${esc(l.point_name)}</b> · ${esc(l.sku_name)}</span><b class="evening-low">${num(l.current)} / мин ${num(l.min_stock)}</b></div>`).join('')}</div>
       </div>` : ''}
       ${d.unclosed_shifts.length ? `<div class="card" style="border-color:var(--warn)">
         <h3>⏰ Незакрытые смены</h3>
@@ -343,6 +361,7 @@ async function viewDashboard(v) {
         ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}
       </div>`;
     body.querySelectorAll('[data-shift]').forEach((a) => a.onclick = () => openShift(Number(a.dataset.shift)));
+    const gp = $('#goProc', body); if (gp) gp.onclick = () => { App.route = 'procurement'; renderShell(); };
   };
   App._refresh = load; await load();
 }
@@ -787,6 +806,59 @@ async function viewPointMonitor(v) {
     const backBtn = $('#backBtn', v); if (backBtn) backBtn.onclick = () => { App.route = App.state.monFrom || 'points'; renderShell(); };
     const detBtn = $('#detBtn', v); if (detBtn) detBtn.onclick = () => { App.state.shiftFrom = 'pointmon'; openShift(p.shift_id); };
   };
+  App._refresh = load; await load();
+}
+
+// ---- Закуп (BRE/ADMIN) — расчёт закупки по всем точкам ----
+async function viewProcurement(v) {
+  v.innerHTML = topbar('Расчёт на закуп', '<button class="btn secondary sm" id="expProc">Экспорт в Excel</button>');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  body.innerHTML = `
+    <div class="filters">
+      <div class="field"><label>Анализ продаж за (дней)</label><input id="pDays" type="number" min="1" max="90" value="7"></div>
+      <div class="field"><label>Запас на (дней)</label><input id="pHor" type="number" min="1" max="90" value="7"></div>
+      <div class="field"><label>Страховой запас (%)</label><input id="pSafe" type="number" min="0" max="200" value="20"></div>
+      <div class="field"><label>Срок поставки (дней)</label><input id="pLead" type="number" min="0" max="90" value="2"></div>
+      <button class="btn sm" id="pCalc">Рассчитать</button>
+    </div>
+    <div class="muted" style="margin-bottom:14px">Расчёт по фактическим продажам каждой точки.
+      <span class="crit-badge">СРОЧНО</span> — остатка хватит только на срок поставки: везти в первую очередь.</div>
+    <div id="procOut"></div>`;
+  const params = () => `days=${Number($('#pDays', v).value) || 7}&horizon=${Number($('#pHor', v).value) || 7}` +
+    `&safety=${Number($('#pSafe', v).value) || 0}&lead=${Number($('#pLead', v).value) || 0}`;
+  const load = async () => {
+    const d = await api('/procurement?' + params());
+    const out = $('#procOut', v);
+    out.innerHTML = `
+      <div class="kpis">
+        ${kpi('Точек к пополнению', d.points.filter((p) => p.rows.length).length)}
+        ${kpi('Всего заказать (шт)', num(d.total_reorder), true)}
+        ${d.critical_count ? `<div class="kpi kpi-crit"><div class="label">Критично срочно</div><div class="value">${d.critical_count} поз.</div></div>` : kpi('Критично срочно', '0 поз.')}
+      </div>
+      ${d.points.filter((p) => p.rows.length).map((p) => `
+        <div class="card proc-point ${p.critical_count ? 'has-crit' : ''}" style="margin-bottom:16px;padding:0;overflow:hidden">
+          <div class="proc-head">
+            <div class="row" style="gap:10px"><h3 style="margin:0">${esc(p.point_name)}</h3>
+              ${p.critical_count ? `<span class="crit-badge">СРОЧНО · ${p.critical_count}</span>` : ''}</div>
+            <span class="muted">заказать: <b>${num(p.reorder_sum)} шт</b></span>
+          </div>
+          <table class="shift-table">
+            <thead><tr><th>SKU</th><th class="num">Остаток</th><th class="num">Средн./день</th><th class="num">Хватит на</th><th class="num">Нужно</th><th class="num">Заказать</th></tr></thead>
+            <tbody>${p.rows.map((r) => `<tr class="${r.critical ? 'crit-row' : ''}">
+              <td><b>${esc(r.name)}</b>${r.critical ? ' <span class="crit-badge">срочно</span>' : ''}<div class="muted" style="font-size:12px">${esc(r.category || '')}</div></td>
+              <td class="num"><b class="${r.critical ? 'evening-low' : ''}">${num(r.current)}</b></td>
+              <td class="num">${num(r.per_day)}</td>
+              <td class="num">${r.per_day > 0 ? Math.floor(r.current / r.per_day) + ' дн.' : '—'}</td>
+              <td class="num">${num(r.recommended)}</td>
+              <td class="num">${r.reorder > 0 ? `<span class="reorder-pill">+${num(r.reorder)}</span>` : '—'}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`).join('') || '<div class="empty">Все точки обеспечены — закуп не требуется. 🎉</div>'}`;
+  };
+  $('#pCalc', v).onclick = load;
+  wireEnterNav(v, '.filters input', load);
+  $('#expProc', v).onclick = () => window.open('/api/procurement/export.xlsx?' + params(), '_blank');
   App._refresh = load; await load();
 }
 
@@ -1320,14 +1392,16 @@ async function viewPoints(v) {
   if (isAdmin) $('#add').onclick = () => pointForm();
   const load = async () => {
     const points = await api('/points');
-    body.innerHTML = points.map((p) => `<div class="card">
-      <div class="row between"><h3>${esc(p.name)}</h3>${p.needs_inventory ? '<span class="pill inv">инвент.</span>' : statusPill(p.shift_status)}</div>
+    body.innerHTML = points.map((p) => `<div class="card ${p.low_stock_count > 0 ? 'point-crit' : ''}">
+      <div class="row between"><div class="row" style="gap:8px"><h3 style="margin:0">${esc(p.name)}</h3>
+        ${p.low_stock_count > 0 ? `<span class="crit-badge">малые остатки · ${p.low_stock_count}</span>` : ''}</div>
+        ${p.needs_inventory ? '<span class="pill inv">инвент.</span>' : statusPill(p.shift_status)}</div>
       <div class="muted">${esc(p.address || '')} · BRE: ${emp(p.bre_name)}</div>
       <div style="margin:12px 0">
         <div class="stat-line"><span>Подключено SE</span><b>${p.se_connected.length ? p.se_connected.map((s) => emp(s.full_name)).join(', ') : `0/${p.max_se}`}</b></div>
         <div class="stat-line"><span>Продажи сегодня</span><b>${num(p.sales_qty)} · ${money(p.sales_value)}</b></div>
         <div class="stat-line"><span>Стоимость остатка</span><b>${money(p.stock_value)}</b></div>
-        <div class="stat-line"><span>Низкий остаток</span><b>${p.low_stock_count}</b></div>
+        <div class="stat-line"><span>Низкий остаток</span><b class="${p.low_stock_count > 0 ? 'evening-low' : ''}">${p.low_stock_count}</b></div>
         <div class="stat-line"><span>Обновлено</span><b>${fmtDate(p.last_update)}</b></div>
       </div>
       <div class="row wrap">

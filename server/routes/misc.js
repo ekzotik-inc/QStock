@@ -156,6 +156,54 @@ router.put('/skus/:id/logistics', authRequired, (req, res) => {
   res.json({ ok: true, safety_pct: sp, lead_days: ld });
 });
 
+// Procurement plan across all visible points (BRE/ADMIN).
+// Reuses the per-point forecast; marks critical positions (stock only covers lead time).
+router.get('/procurement', authRequired, (req, res) => {
+  if (!['BRE', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
+  const ids = visiblePointIds(req.user);
+  const points = [];
+  let totalReorder = 0, criticalCount = 0;
+  for (const pid of ids) {
+    const p = db.prepare('SELECT id, name FROM points WHERE id=?').get(pid);
+    const f = buildForecast(pid, req.query);
+    const lead = Math.min(Math.max(Number(req.query.lead) || 0, 0), 90);
+    const rows = f.rows.map((r) => {
+      const effLead = r.lead_days != null ? r.lead_days : lead;
+      // critical: current stock covers no more than the supplier lead time
+      const critical = r.per_day > 0 && r.current <= r.per_day * Math.max(effLead, 1);
+      return { ...r, critical };
+    }).filter((r) => r.reorder > 0 || r.critical);
+    const reorderSum = rows.reduce((a, r) => a + r.reorder, 0);
+    const crit = rows.filter((r) => r.critical).length;
+    totalReorder += reorderSum; criticalCount += crit;
+    points.push({ point_id: pid, point_name: p.name, rows, reorder_sum: reorderSum, critical_count: crit });
+  }
+  // most urgent points first
+  points.sort((a, b) => (b.critical_count - a.critical_count) || (b.reorder_sum - a.reorder_sum));
+  res.json({ days: Number(req.query.days) || 7, horizon: Number(req.query.horizon) || 7,
+    total_reorder: totalReorder, critical_count: criticalCount, points });
+});
+
+// Procurement plan -> Excel
+router.get('/procurement/export.xlsx', authRequired, (req, res) => {
+  if (!['BRE', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
+  const ids = visiblePointIds(req.user);
+  const header = ['Точка', 'Категория', 'SKU', 'Артикул', 'Остаток', 'Средн./день', 'Нужно', 'Заказать', 'Срочно'];
+  const out = [header];
+  for (const pid of ids) {
+    const p = db.prepare('SELECT name FROM points WHERE id=?').get(pid);
+    const f = buildForecast(pid, req.query);
+    const lead = Math.min(Math.max(Number(req.query.lead) || 0, 0), 90);
+    for (const r of f.rows) {
+      if (r.reorder <= 0) continue;
+      const effLead = r.lead_days != null ? r.lead_days : lead;
+      const critical = r.per_day > 0 && r.current <= r.per_day * Math.max(effLead, 1);
+      out.push([p.name, r.category || '', r.name, r.article, r.current, r.per_day, r.recommended, r.reorder, critical ? 'СРОЧНО' : '']);
+    }
+  }
+  sendXlsx(res, 'procurement.xlsx', out, 'Закуп');
+});
+
 // Order-request (Запасы) — only positions to reorder -> Excel.
 router.get('/point-stock-forecast/:pointId/export.xlsx', authRequired, (req, res) => {
   const pid = Number(req.params.pointId);
