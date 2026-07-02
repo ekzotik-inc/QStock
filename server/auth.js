@@ -16,9 +16,12 @@ function sign(user) {
 }
 
 function login(req, res) {
-  const { login: lg, password } = req.body || {};
+  let { login: lg, password } = req.body || {};
+  // trim: copy-paste and autofill often add stray spaces
+  lg = String(lg || '').trim();
+  password = String(password || '').trim();
   if (!lg || !password) return res.status(400).json({ error: 'Логин и пароль обязательны' });
-  const user = db.prepare('SELECT * FROM users WHERE login = ?').get(lg);
+  const user = db.prepare('SELECT * FROM users WHERE login = ? COLLATE NOCASE').get(lg);
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   }

@@ -80,6 +80,8 @@ a { color: var(--accent-ink); }
   border-radius: var(--radius-sm); font-size: 14px; background: var(--surface); color: var(--ink);
   outline: none; transition: border-color .15s, box-shadow .15s; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.login-err { background: var(--danger-weak); color: var(--danger); font-size: 13px; font-weight: 600;
+  padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 14px; animation: fadeIn .25s var(--ease); }
 
 /* ---------- Buttons ---------- */
 .btn { border: 1px solid transparent; background: var(--accent); color: var(--accent-contrast); font-weight: 700;

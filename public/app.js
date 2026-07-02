@@ -124,18 +124,24 @@ function renderLogin() {
     <div class="login-wrap"><div class="login-card">
       <h1>Q<span style="color:var(--accent-ink)">Stock</span></h1>
       <div class="sub">CRM учёта остатков и продаж</div>
-      <div class="field"><label>Логин</label><input id="lg" autofocus /></div>
-      <div class="field"><label>Пароль</label><input id="pw" type="password" /></div>
+      <div class="field"><label>Логин</label><input id="lg" autocomplete="username" autofocus /></div>
+      <div class="field"><label>Пароль</label><input id="pw" type="password" autocomplete="current-password" /></div>
+      <div id="loginErr" class="login-err" style="display:none"></div>
       <button class="btn block" id="loginBtn">Войти</button>
       <div class="muted" style="margin-top:16px;font-size:12px;color:var(--ink-soft)">demo: admin/admin123 · bre/bre123 · se/se123</div>
       <div class="muted" id="buildInfo" style="margin-top:8px;font-size:11px;color:var(--ink-soft)"></div>
     </div></div>`);
   document.getElementById('app').appendChild(card);
   const doLogin = async () => {
+    const err = $('#loginErr'); err.style.display = 'none';
     try {
-      const out = await api('/auth/login', { method: 'POST', body: { login: $('#lg').value, password: $('#pw').value } });
+      const out = await api('/auth/login', { method: 'POST', body: { login: $('#lg').value.trim(), password: $('#pw').value.trim() } });
       App.user = out.user; connectSocket(); renderShell();
-    } catch {}
+    } catch (e) {
+      err.textContent = (e && e.message && e.message !== 'error') ? e.message : 'Неверный логин или пароль. Проверьте раскладку и автозаполнение.';
+      err.style.display = 'block';
+      $('#pw').value = ''; $('#pw').focus();
+    }
   };
   $('#loginBtn').onclick = doLogin;
   card.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
