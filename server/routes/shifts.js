@@ -10,6 +10,13 @@ const rt = require('../realtime');
 
 const router = express.Router();
 
+// When a shift is closed, all SE connected to the point during that shift are
+// released and the connected-employee count returns to zero.
+function disconnectAllSE(pointId) {
+  db.prepare('DELETE FROM point_se WHERE point_id = ?').run(pointId);
+  rt.emitPoint(pointId, 'point:changed', { pointId });
+}
+
 function shiftDetail(shiftId) {
   const shift = db.prepare(
     `SELECT sh.*, p.name AS point_name, p.sale_mode, p.bre_id,
@@ -320,6 +327,7 @@ router.post('/:id/close', authRequired, (req, res) => {
   }
   db.prepare(`UPDATE shifts SET status='closed', closed_by=?, closed_at=datetime('now') WHERE id=?`)
     .run(req.user.id, shiftId);
+  disconnectAllSE(shift.point_id);   // shift closed -> reset connected SE to 0
   audit({ userId: req.user.id, action: 'shift_close', entity: 'shift', newValue: { shift_id: shiftId }, ip: req.ip });
   rt.emitPoint(shift.point_id, 'shift:changed', { pointId: shift.point_id, shiftId, status: 'closed' });
   res.json(shiftDetail(shiftId));
@@ -332,6 +340,7 @@ router.post('/:id/force-close', requireRole('ADMIN'), (req, res) => {
   if (!shift) return res.status(404).json({ error: 'Не найдено' });
   db.prepare(`UPDATE shifts SET status='closed', needs_inventory=0, closed_by=?, closed_at=datetime('now') WHERE id=?`)
     .run(req.user.id, shiftId);
+  disconnectAllSE(shift.point_id);   // shift closed -> reset connected SE to 0
   audit({ userId: req.user.id, action: 'shift_force_close', entity: 'shift', newValue: { shift_id: shiftId }, ip: req.ip });
   rt.emitPoint(shift.point_id, 'shift:changed', { pointId: shift.point_id, shiftId, status: 'closed' });
   res.json(shiftDetail(shiftId));

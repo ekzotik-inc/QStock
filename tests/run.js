@@ -145,10 +145,12 @@ async function login(login, password) {
   const close = await req('POST', `/api/shifts/${sid}/close`, se);
   check('SHF-10', close.status === 200 && close.data.shift.status === 'closed', 'close shift');
   check('SHF-11', (await req('POST', `/api/shifts/${sid}/op`, se, { sku_id: skuA, type: 'sale', qty: 1 })).status === 400, 'closed read-only');
+  check('SHF-17', !(await req('GET', '/api/points', admin)).data.find((p) => p.id === pid).se_connected.length, 'closing shift releases all connected SE');
   check('SHF-02', await testCarryover(se, pid, skuA), 'carryover opening from prev close');
   // ensure point is free, then open a fresh shift so a conflict exists
   let cur = (await req('GET', '/api/points', admin)).data.find((p) => p.id === pid).shift_id;
   if (cur) await req('POST', `/api/shifts/${cur}/force-close`, admin);
+  await req('POST', `/api/points/${pid}/connect`, se); // closing a shift releases SE; reconnect to reopen
   const conflictOpen = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, opening: [] });
   // sid is closed; reopening it must fail because conflictOpen is open on same point
   const reopen = await req('POST', `/api/shifts/${sid}/reopen`, admin);
@@ -206,6 +208,7 @@ async function login(login, password) {
     // ensure point free
     const p = (await req('GET', '/api/points', admin)).data.find((x) => x.id === pointId);
     if (p.shift_id) await req('POST', `/api/shifts/${p.shift_id}/force-close`, admin);
+    await req('POST', `/api/points/${pointId}/connect`, seTok);
     const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: true });
     if (o.status !== 200) return false;
     const prevClosing = 77; // from inventory perform new opening, untouched
@@ -222,6 +225,7 @@ async function login(login, password) {
     // create a low-min sku
     const a = 'LOW-' + Date.now();
     const lowSku = (await req('POST', '/api/skus', adminTok, { name: 'LowSKU', article: a, price: 100, min_stock: 10 })).data;
+    await req('POST', `/api/points/${pointId}/connect`, seTok);
     const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: false, opening: [{ sku_id: lowSku.id, qty: 12 }] });
     await req('POST', `/api/shifts/${o.data.shift.id}/op`, seTok, { sku_id: lowSku.id, type: 'sale', qty: 5 }); // 12-5=7 <=10
     await new Promise((r) => setTimeout(r, 200));
@@ -243,6 +247,7 @@ async function login(login, password) {
     const p = (await req('GET', '/api/points', adminTok)).data.find((x) => x.id === pointId);
     if (p.shift_id) await req('POST', `/api/shifts/${p.shift_id}/force-close`, adminTok);
     const skuId = (await req('GET', '/api/skus', seTok)).data[0].id;
+    await req('POST', `/api/points/${pointId}/connect`, seTok);
     const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: false, opening: [{ sku_id: skuId, qty: 50 }] });
     const sid2 = o.data.shift.id;
     await new Promise((resolve) => {
