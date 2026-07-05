@@ -474,11 +474,55 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 .nav a, .card, .pill, th, td, .kpi { transition: background-color .2s var(--ease), color .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease), transform .12s var(--ease); }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 
+/* ============================================================
+   Навигация (группы, бейджи, иконки Lucide) + адаптив
+   ============================================================ */
+
+/* --- группы в сайдбаре --- */
+.nav-group { display: flex; flex-direction: column; gap: 3px; }
+.nav-group-title { font-size: 11px; font-weight: 800; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-soft); padding: 16px 12px 6px; }
+.nav-group:first-child .nav-group-title { padding-top: 4px; }
+
+/* --- бейдж «требуется действие» на пункте меню --- */
+.nav-badge { margin-left: auto; background: var(--danger); color: #fff; font-size: 11px;
+  font-weight: 800; min-width: 19px; height: 19px; border-radius: 10px;
+  display: grid; place-items: center; padding: 0 5px; }
+
+/* --- иконки Lucide в меню (i заменяется на svg после createIcons) --- */
+.nav a svg, .nav a i { width: 19px; height: 19px; flex: none; }
+
+/* --- контейнер графика Chart.js --- */
+.chart-box { position: relative; height: 220px; }
+
+/* --- выдвижная подложка и нижняя навигация: скрыты на десктопе --- */
+.drawer-bg { display: none; }
+.bottom-nav { display: none; }
+
+/* --- планшет: компактные отступы, сайдбар остаётся --- */
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; }
-  .nav { flex-direction: row; flex-wrap: wrap; }
-  .sidebar .me { margin-top: 14px; }
   .topbar { padding: 14px 18px; }
   .main > *:not(.topbar) { padding-left: 18px; padding-right: 18px; }
+  .cards { grid-template-columns: 1fr; }
+}
+
+/* --- телефон: сайдбар становится выдвижной панелью + нижняя навигация --- */
+@media (max-width: 760px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; z-index: 70; left: 0; top: 0; bottom: 0; width: 280px;
+    height: 100vh; transform: translateX(-102%); transition: transform .25s var(--ease);
+    box-shadow: var(--shadow-lg); }
+  .shell.drawer-open .sidebar { transform: none; }
+  .drawer-bg { display: none; position: fixed; inset: 0; background: rgba(10, 22, 24, .5); z-index: 60; }
+  .shell.drawer-open .drawer-bg { display: block; }
+  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+    justify-content: space-around; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); }
+  .bottom-nav button { border: none; background: transparent; display: flex; flex-direction: column;
+    align-items: center; gap: 3px; cursor: pointer; color: var(--ink-soft);
+    min-width: 56px; padding: 4px 6px; border-radius: 12px; font-size: 10px; font-weight: 700; }
+  .bottom-nav button.active { color: var(--accent-ink); }
+  .bottom-nav button svg, .bottom-nav button i { width: 21px; height: 21px; }
+  .main { padding-bottom: 76px; }
 }

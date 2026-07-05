@@ -34,7 +34,7 @@ async function loginAs(page, login, password) {
 
     // SE nav must be the cabinet tabs
     const seNav = (await page.$$eval('.nav a', (e) => e.map((x) => x.innerText.trim()))).join('|');
-    check('UI-SE-NAV', /Моя смена/.test(seNav) && /Новое поступление/.test(seNav) && /История смен/.test(seNav) && /Логи/.test(seNav), seNav);
+    check('UI-SE-NAV', /Моя смена/.test(seNav) && /Поступление/.test(seNav) && /История смен/.test(seNav) && /Логи/.test(seNav), seNav);
 
     // Моя смена → connect to first point
     await page.click('.nav a[data-route="myshift"]');
@@ -115,6 +115,12 @@ async function loginAs(page, login, password) {
         if (await page.isVisible('#okReport')) await page.click('#okReport');
         await page.waitForTimeout(400);
 
+        // closing a shift releases the SE from the point; reconnect to keep working
+        await page.click('.nav a[data-route="myshift"]'); await page.waitForTimeout(500);
+        if (await page.isVisible('[data-connect]')) {
+          await page.click('[data-connect]'); await page.waitForTimeout(600);
+        }
+
         // История смен + Логи
         await page.click('.nav a[data-route="shifthistory"]'); await page.waitForTimeout(600);
         check('UI-SE-HISTORY', await page.isVisible('table tbody tr'), 'closed shift in history');
@@ -174,7 +180,7 @@ async function loginAs(page, login, password) {
 
     await page2.click('.nav a[data-route="analytics"]');
     await page2.waitForTimeout(800);
-    check('UI-ADM-ANALYTICS', await page2.isVisible('.chart, .bar-row, .empty'), 'analytics charts render');
+    check('UI-ADM-ANALYTICS', await page2.isVisible('.chart-box, canvas, .empty'), 'analytics charts render');
 
     await page2.click('.nav a[data-route="audit"]');
     await page2.waitForTimeout(600);
@@ -183,7 +189,7 @@ async function loginAs(page, login, password) {
     // The pre-login GET /api/auth/me returns 401 by design (probe for an existing
     // session); the browser logs it as a failed resource. Not a defect.
     const realErrors = errors.filter((e) => !/401 \(Unauthorized\)|status of 401/.test(e)
-      && !/ERR_CONNECTION_CLOSED|fonts\.googleapis|fonts\.gstatic|ERR_NAME_NOT_RESOLVED/.test(e));
+      && !/ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|fonts\.googleapis|fonts\.gstatic|ERR_NAME_NOT_RESOLVED/.test(e));
     console.log('\nAll captured (incl. expected 401 probe):', errors.length, '| real:', realErrors.length);
     realErrors.slice(0, 20).forEach((e) => console.log('   !', e));
     check('UI-NO-JS-ERRORS', realErrors.length === 0, realErrors.length ? realErrors[0] : 'no JS errors');

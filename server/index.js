@@ -61,7 +61,9 @@ app.use('/api', authRequired, miscRoutes);
 app.use(express.static(path.join(__dirname, '..', 'public'), {
   etag: true,
   setHeaders: (res, filePath) => {
-    if (/\.(js|css|html)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+    // Vendored third-party libs are immutable (version-pinned) — cache long-term.
+    if (filePath.includes(`${path.sep}vendor${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    else if (/\.(js|css|html)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
   },
 }));
 app.get('*', (req, res) => {

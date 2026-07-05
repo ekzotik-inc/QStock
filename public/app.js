@@ -116,6 +116,9 @@ function handleRealtime(ev, data) {
   // SE "Моя смена" — live update on sales/stock/shift changes; skip while the SE
   // is editing or just edited (their own change is already reflected locally)
   if (App.route === 'myshift' && App._refresh) {
+    // shift closed / SE connection changed — re-render from scratch so the view
+    // re-checks the point (and shows the picker if the SE was released)
+    if (ev === 'shift:changed' || ev === 'point:changed') { renderRoute(); return; }
     const typing = document.activeElement && document.activeElement.classList.contains('sold-input');
     const justEdited = App.state.lastSeInput && (Date.now() - App.state.lastSeInput < 2000);
     if (!typing && !justEdited) App._refresh();
@@ -166,65 +169,97 @@ function renderLogin() {
 }
 
 // ---------- shell ----------
-function navItems() {
+// Grouped navigation. Item format: [route, label, lucide-icon].
+function navGroups() {
   const r = App.user.role;
-  if (r === 'SE') {
-    return [
-      ['myshift', 'Моя смена'],
-      ['arrival', 'Новое поступление'],
-      ['writeoff', 'Списание / возврат'],
-      ['setasks', 'Задачи на точку'],
-      ['seinv', 'Инвентаризация'],
-      ['sestock', 'Запасы в точке'],
-      ['notes', 'Заметки'],
-      ['shifthistory', 'История смен'],
-      ['selogs', 'Логи'],
-    ];
-  }
-  if (r === 'BRE') {
-    return [
-      ['dashboard', 'Дашборд'],
-      ['points', 'Мои точки'],
-      ['tasksmgr', 'Задачи'],
-      ['procurement', 'Закуп'],
-      ['approvals', 'Заявки'],
-      ['invhistory', 'Инвентаризации'],
-      ['shifts', 'Смены'],
-      ['analytics', 'Аналитика'],
-      ['movements', 'Движение SKU'],
-    ];
-  }
+  if (r === 'SE') return [
+    { h: 'Смена', items: [
+      ['myshift', 'Моя смена', 'store'],
+      ['arrival', 'Поступление', 'truck'],
+      ['writeoff', 'Списание / возврат', 'trash-2'],
+      ['seinv', 'Инвентаризация', 'clipboard-check'],
+    ]},
+    { h: 'Точка', items: [
+      ['setasks', 'Задачи', 'clipboard-list'],
+      ['notes', 'Заметки', 'sticky-note'],
+      ['sestock', 'Запасы в точке', 'layers'],
+    ]},
+    { h: 'История', items: [
+      ['shifthistory', 'История смен', 'history'],
+      ['selogs', 'Логи', 'list'],
+    ]},
+  ];
+  if (r === 'BRE') return [
+    { h: 'Обзор', items: [
+      ['dashboard', 'Дашборд', 'layout-dashboard'],
+      ['analytics', 'Аналитика', 'bar-chart-3'],
+    ]},
+    { h: 'Операции', items: [
+      ['points', 'Мои точки', 'map-pin'],
+      ['shifts', 'Смены', 'clock'],
+      ['tasksmgr', 'Задачи', 'clipboard-list'],
+      ['approvals', 'Заявки', 'inbox'],
+      ['invhistory', 'Инвентаризации', 'clipboard-check'],
+    ]},
+    { h: 'Снабжение', items: [
+      ['procurement', 'Закуп', 'shopping-cart'],
+      ['movements', 'Движение SKU', 'arrow-right-left'],
+    ]},
+  ];
   // ADMIN
   return [
-    ['dashboard', 'Дашборд'],
-    ['points', 'Торговые точки'],
-    ['tasksmgr', 'Задачи'],
-    ['procurement', 'Закуп'],
-    ['approvals', 'Заявки'],
-    ['invhistory', 'Инвентаризации'],
-    ['shifts', 'Смены'],
-    ['analytics', 'Аналитика'],
-    ['kpi', 'KPI'],
-    ['movements', 'Движение SKU'],
-    ['skus', 'SKU'],
-    ['users', 'Пользователи'],
-    ['schedules', 'Планы инвентаризаций'],
-    ['audit', 'Журнал'],
+    { h: 'Обзор', items: [
+      ['dashboard', 'Дашборд', 'layout-dashboard'],
+      ['analytics', 'Аналитика', 'bar-chart-3'],
+      ['kpi', 'KPI', 'gauge'],
+    ]},
+    { h: 'Операции', items: [
+      ['points', 'Торговые точки', 'map-pin'],
+      ['shifts', 'Смены', 'clock'],
+      ['tasksmgr', 'Задачи', 'clipboard-list'],
+      ['approvals', 'Заявки', 'inbox'],
+      ['invhistory', 'Инвентаризации', 'clipboard-check'],
+    ]},
+    { h: 'Снабжение', items: [
+      ['procurement', 'Закуп', 'shopping-cart'],
+      ['movements', 'Движение SKU', 'arrow-right-left'],
+    ]},
+    { h: 'Справочники', items: [
+      ['skus', 'SKU', 'package'],
+      ['users', 'Пользователи', 'users'],
+    ]},
+    { h: 'Система', items: [
+      ['schedules', 'Планы инвентаризаций', 'calendar-days'],
+      ['audit', 'Журнал действий', 'file-text'],
+    ]},
   ];
 }
+
+// Compatibility: flat list of nav items.
+function navItems() { return navGroups().flatMap((g) => g.items); }
 
 // Detail routes that are reachable without a sidebar nav entry.
 const DETAIL_ROUTES = ['shift', 'pointmon'];
 
 function renderShell() {
   loadNotifications();
-  const items = navItems();
+  const groups = navGroups();
+  const items = groups.flatMap((g) => g.items);
   if (!items.find((i) => i[0] === App.route) && !DETAIL_ROUTES.includes(App.route)) App.route = items[0][0];
+  const badges = App.state.navBadges || {};
+  const link = ([k, l, ic]) => `<a data-route="${k}" class="${k === App.route ? 'active' : ''}">
+      <i data-lucide="${ic}"></i><span>${l}</span>
+      ${badges[k] ? `<span class="nav-badge">${badges[k]}</span>` : ''}</a>`;
+  const bottom = items.slice(0, 4).map(([k, l, ic]) =>
+    `<button data-route="${k}" class="${k === App.route ? 'active' : ''}"><i data-lucide="${ic}"></i>${l.split(' ')[0]}</button>`).join('')
+    + `<button id="drawerBtn"><i data-lucide="more-horizontal"></i>Ещё</button>`;
   const shell = el(`
     <div class="shell">
+      <div class="drawer-bg"></div>
       <aside class="sidebar">
         <div class="brand"><span class="logo">Q</span><span>Stock</span></div>
-        <nav class="nav">${items.map(([k, l]) => `<a data-route="${k}" class="${k === App.route ? 'active' : ''}">${navIcon(k)}<span>${l}</span></a>`).join('')}</nav>
+        <nav class="nav">${groups.map((g) =>
+          `<div class="nav-group"><div class="nav-group-title">${g.h}</div>${g.items.map(link).join('')}</div>`).join('')}</nav>
         <div class="me">
           <div class="avatar">${esc(initials(App.user.full_name))}</div>
           <div style="flex:1;min-width:0">
@@ -232,13 +267,18 @@ function renderShell() {
             <div class="role">${roleLabel(App.user.role)}</div>
           </div>
         </div>
-        <button class="logout-item" id="logoutBtn">${ICON.logout}<span>Выйти из системы</span></button>
+        <button class="logout-item" id="logoutBtn"><i data-lucide="log-out"></i><span>Выйти из системы</span></button>
       </aside>
-      <main class="main" id="view"></main>
+      <main class="main"><div id="view"></div></main>
+      <div class="bottom-nav">${bottom}</div>
     </div>`);
   document.getElementById('app').innerHTML = '';
   document.getElementById('app').appendChild(shell);
-  shell.querySelectorAll('.nav a').forEach((a) => a.onclick = () => { App.route = a.dataset.route; renderShell(); });
+  shell.querySelectorAll('.nav a, .bottom-nav button[data-route]').forEach((a) =>
+    a.onclick = () => { App.route = a.dataset.route; renderShell(); });
+  const drawerBtn = shell.querySelector('#drawerBtn');
+  if (drawerBtn) drawerBtn.onclick = () => shell.classList.add('drawer-open');
+  shell.querySelector('.drawer-bg').onclick = () => shell.classList.remove('drawer-open');
   $('#logoutBtn').onclick = async () => {
     try { await api('/auth/logout', { method: 'POST' }); } catch {}
     App.user = null; App.state = {}; App.notifications = [];
@@ -246,6 +286,7 @@ function renderShell() {
     App.route = 'dashboard';
     renderLogin();
   };
+  if (window.lucide) lucide.createIcons();
   renderRoute();
 }
 
@@ -306,7 +347,17 @@ function themeBtnHtml() { return `<button class="icon-btn" id="themeToggle" titl
 
 // ---------- notifications ----------
 async function loadNotifications() {
-  try { App.notifications = await api('/notifications'); renderBell(); } catch {}
+  try {
+    App.notifications = await api('/notifications');
+    renderBell();
+    const unread = App.notifications.filter((n) => !n.is_read);
+    const cnt = (types) => unread.filter((n) => types.includes(n.type)).length || '';
+    App.state.navBadges = {
+      approvals: cnt(['request_new']),              // BRE/ADMIN: новые заявки
+      setasks: cnt(['task_new', 'task_comment']),   // SE: задачи на точку
+      tasksmgr: cnt(['task_status', 'task_comment']), // BRE/ADMIN: движение по задачам
+    };
+  } catch {}
 }
 function bellHtml() {
   const unread = App.notifications.filter((n) => !n.is_read).length;
@@ -409,11 +460,12 @@ async function viewDashboard(v) {
           <td class="num">${money(r.stock_value)}</td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
       </div>
       <div class="cards">
-        ${chartCard('Продажи по дням', d.charts.sales_by_day.map((x) => [x.d, x.v]))}
+        ${chartCard('Продажи по дням', d.charts.sales_by_day.map((x) => [x.d, x.v]), 'line')}
         ${chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
         ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
         ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}
       </div>`;
+    mountCharts();
     body.querySelectorAll('[data-shift]').forEach((a) => a.onclick = () => openShift(Number(a.dataset.shift)));
     const gp = $('#goProc', body); if (gp) gp.onclick = () => { App.route = 'procurement'; renderShell(); };
   };
@@ -422,12 +474,51 @@ async function viewDashboard(v) {
 const kpi = (label, value, accent) => `<div class="kpi"><div class="label">${label}</div><div class="value ${accent ? 'accent' : ''}">${value}</div></div>`;
 const statusPill = (s) => s === 'open' ? `<span class="pill open"><span class="dot"></span>Открыта</span>` : `<span class="pill closed">Закрыта</span>`;
 
-function chartCard(title, pairs) {
-  const max = Math.max(1, ...pairs.map((p) => Number(p[1]) || 0));
-  const rows = pairs.length ? pairs.map(([l, val]) => `<div class="bar-row"><div class="lbl">${esc(l)}</div>
-    <div class="track"><div class="fill" style="width:${(Number(val) / max * 100).toFixed(1)}%"></div></div>
-    <div class="val">${num(val)}</div></div>`).join('') : '<div class="empty">Нет данных</div>';
-  return `<div class="card"><h3>${esc(title)}</h3><div class="chart">${rows}</div></div>`;
+// Charts via Chart.js.
+//   chartCard(title, pairs)         — horizontal bars (tops, rankings)
+//   chartCard(title, pairs, 'line') — line (sales by day)
+// After each body.innerHTML that uses chartCard(...), call mountCharts().
+let _chartSeq = 0;
+const _chartQueue = [];
+let _chartInstances = [];
+function chartCard(title, pairs, type = 'bar') {
+  const id = 'ch' + (++_chartSeq);
+  _chartQueue.push({ id, pairs, type });
+  return `<div class="card"><h3>${esc(title)}</h3>${pairs.length
+    ? `<div class="chart-box"><canvas id="${id}"></canvas></div>`
+    : '<div class="empty">Нет данных</div>'}</div>`;
+}
+function mountCharts() {
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  while (_chartQueue.length) {
+    const { id, pairs, type } = _chartQueue.shift();
+    const node = document.getElementById(id);
+    if (!node || !window.Chart || !pairs.length) continue;
+    const horizontal = type === 'bar';
+    const tick = { color: css('--ink-soft'), font: { family: 'Manrope', size: 11, weight: 600 } };
+    _chartInstances.push(new Chart(node, {
+      type,
+      data: {
+        labels: pairs.map((p) => p[0]),
+        datasets: [{
+          data: pairs.map((p) => Number(p[1]) || 0),
+          backgroundColor: type === 'line' ? css('--accent-weak') : css('--accent'),
+          borderColor: css('--accent-2'), borderWidth: type === 'line' ? 2 : 0,
+          borderRadius: 6, barThickness: 14, fill: type === 'line',
+          tension: .35, pointRadius: 2, pointBackgroundColor: css('--accent-2'),
+        }],
+      },
+      options: {
+        indexAxis: horizontal ? 'y' : 'x',
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: css('--surface-2') }, ticks: tick, beginAtZero: true },
+          y: { grid: { display: !horizontal, color: css('--surface-2') }, ticks: tick, beginAtZero: true },
+        },
+      },
+    }));
+  }
 }
 
 // ============================================================
@@ -577,7 +668,9 @@ async function viewMyShift(v) {
   }
 
   const load = async () => {
-    const [d, cats] = await Promise.all([api('/shifts/' + mine.shift_id), getCategories()]);
+    let d, cats;
+    try { [d, cats] = await Promise.all([api('/shifts/' + mine.shift_id), getCategories()]); }
+    catch { return viewMyShift(v); } // shift closed / SE released from point — re-render (shows picker)
     App.state.shiftId = d.shift.id;
     App.socket.emit('watch:point', d.shift.point_id);
     const t = d.totals;
@@ -1784,7 +1877,7 @@ async function viewAnalytics(v) {
     if ($('#dt').value) q.set('date_to', $('#dt').value);
     const d = await api('/analytics/dashboard?' + q.toString());
     body.innerHTML = `<div class="cards">
-      ${chartCard('Продажи по дням', d.charts.sales_by_day.map((x) => [x.d, x.v]))}
+      ${chartCard('Продажи по дням', d.charts.sales_by_day.map((x) => [x.d, x.v]), 'line')}
       ${chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
       ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
       ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}</div>
@@ -1792,6 +1885,7 @@ async function viewAnalytics(v) {
       <div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th></tr></thead>
       <tbody>${d.table.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td><td>${statusPill(r.shift_status)}</td>
         <td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td><td class="num">${money(r.stock_value)}</td></tr>`).join('')}</tbody></table></div>`;
+    mountCharts();
   };
   $('#apply').onclick = load;
   wireEnterNav(v, '.filters input', load);
@@ -1812,6 +1906,7 @@ async function viewKpi(v) {
       ${kpi('Точек', k.points)} ${kpi('Сумма продаж', money(k.sales_value), true)} ${kpi('Остаток, сум', money(k.stock_value), true)}
       ${kpi('Активных SE', k.active_se)} ${kpi('Незакрытых смен', k.unclosed)} ${kpi('Низкий остаток', k.low_stock)}</div>
       <div class="section-title">Рейтинг точек</div>${chartCard('Продажи', k.ranking.map((r) => [r.name, r.sales_value]))}`;
+    mountCharts();
     return;
   }
   // ADMIN: pick SE or BRE
