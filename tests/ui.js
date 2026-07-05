@@ -58,8 +58,8 @@ async function loginAs(page, login, password) {
 
     const boardVisible = await page.isVisible('.se-shift tbody tr');
     check('UI-SE-SHIFT-BOARD', boardVisible, 'SE shift table renders');
-    // "0" shown as a placeholder hint (empty value) in продано
-    const ghost = await page.$eval('.sold-input', (e) => e.value === '' && e.placeholder === '0').catch(() => false);
+    // "0" shown as a placeholder hint (empty value) in продано — any zero-sales row
+    const ghost = await page.$$eval('.sold-input', (els) => els.some((e) => e.value === '' && e.placeholder === '0')).catch(() => false);
     check('UI-SE-SOLD-GHOST', ghost, 'продано shows 0 as a placeholder hint');
 
     // grouped table with the requested columns + category rows
