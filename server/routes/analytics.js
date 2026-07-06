@@ -61,12 +61,15 @@ router.get('/dashboard', authRequired, (req, res) => {
   const table = ids.map((pid) => pointRow(pid, from, to));
 
   // charts
+  // Sales-by-day shows a trend: default to a trailing 14-day window even though
+  // the KPI tiles reflect "today", unless an explicit date range was requested.
+  const chartFrom = date_from || (() => { const d = new Date(); d.setDate(d.getDate() - 13); return d.toISOString().slice(0, 10); })();
   const salesByDay = db.prepare(
     `SELECT date(sa.created_at) d, COALESCE(SUM(sa.qty*sa.price),0) v, COALESCE(SUM(sa.qty),0) q
      FROM sales sa JOIN shifts sh ON sh.id=sa.shift_id
      WHERE sh.point_id IN (${ph}) AND date(sa.created_at) BETWEEN ? AND ?
      GROUP BY date(sa.created_at) ORDER BY d`
-  ).all(...ids, from, to);
+  ).all(...ids, chartFrom, to);
 
   const salesBySku = db.prepare(
     `SELECT sk.name, COALESCE(SUM(sa.qty),0) q, COALESCE(SUM(sa.qty*sa.price),0) v
