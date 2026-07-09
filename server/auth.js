@@ -34,7 +34,7 @@ function login(req, res) {
 
 function publicUser(u) {
   return { id: u.id, full_name: u.full_name, login: u.login, role: u.role, status: u.status,
-    phone: u.phone || null, avatar_color: u.avatar_color || null };
+    phone: u.phone || null, avatar_color: u.avatar_color || null, avatar: u.avatar || null };
 }
 
 function logout(req, res) {

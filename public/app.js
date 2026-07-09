@@ -196,7 +196,6 @@ function navGroups() {
     { h: 'Смена', items: [
       ['myshift', 'Моя смена', 'store'],
       ['arrival', 'Поступление', 'truck'],
-      ['writeoff', 'Списание / возврат', 'trash-2'],
       ['seinv', 'Инвентаризация', 'clipboard-check'],
     ]},
     { h: 'Точка', items: [
@@ -281,7 +280,7 @@ function renderShell() {
         ${App.user.role === 'SE' ? '<div class="sb-shift off" id="sbShift" style="display:none"></div>' : ''}
         <div class="sb-foot">
           <div class="me click" id="meBtn" title="Мой профиль">
-            <div class="avatar" style="${App.user.avatar_color ? `background:${esc(App.user.avatar_color)}` : ''}">${esc(initials(App.user.full_name))}</div>
+            <div class="avatar" style="${App.user.avatar_color ? `background:${esc(App.user.avatar_color)}` : ''}">${App.user.avatar ? `<img src="${App.user.avatar}" alt="">` : esc(initials(App.user.full_name))}</div>
             <div style="flex:1;min-width:0">
               <div class="who">${emp(App.user.full_name)}</div>
               <div class="role">${roleLabel(App.user.role)}</div>
@@ -1060,50 +1059,96 @@ async function openManualShift(point) {
     });
 }
 
-// ---- Мой профиль ----
-const AVATAR_COLORS = ['#00d1d2', '#5b8def', '#e8a413', '#ef5b5b', '#8a63d2', '#2fb380'];
+// ---- Мой профиль (glassmorphic setup card) ----
+// маска телефона Узбекистана: 9 цифр -> «XX XXX XX XX»
+function uzPhoneMask(digits) {
+  const d = String(digits).replace(/\D/g, '').replace(/^998/, '').slice(0, 9);
+  return [d.slice(0, 2), d.slice(2, 5), d.slice(5, 7), d.slice(7, 9)].filter(Boolean).join(' ');
+}
 async function viewProfile(v) {
   v.innerHTML = topbar('Мой профиль');
   bindBell();
   const p = await api('/users/me/profile');
-  const body = el(`<div class="fade-in" style="max-width:560px">
-    <div class="card">
-      <div class="row" style="gap:16px;align-items:center">
-        <div class="avatar" id="pfAvatar" style="width:56px;height:56px;font-size:20px;cursor:pointer;${p.avatar_color ? `background:${esc(p.avatar_color)}` : ''}">${esc(initials(p.full_name))}</div>
-        <div>
-          <div style="font-size:18px;font-weight:800">${esc(p.full_name)}</div>
-          <div class="muted">${roleLabel(p.role)} · ${esc(p.login)}</div>
+  const nameParts = String(p.full_name || '').trim().split(/\s+/);
+  const firstName = nameParts[0] || '';
+  const lastName = nameParts.slice(1).join(' ');
+  const camSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>';
+  const body = el(`<div class="fade-in pfx-wrap">
+    <div class="pfx-scene">
+      <span class="pfx-orb o1"></span><span class="pfx-orb o2"></span><span class="pfx-orb o3"></span>
+      <div class="pfx-card">
+        <div class="pfx-ava-zone">
+          <div class="pfx-ring">
+            <div class="pfx-ava" id="pfxAva">
+              ${p.avatar ? `<img src="${p.avatar}" alt="">` : `<span class="pfx-init" style="${p.avatar_color ? `background:${esc(p.avatar_color)}` : ''}">${esc(initials(p.full_name))}</span>`}
+              <div class="pfx-ava-hover">${camSvg}</div>
+            </div>
+          </div>
+          <input type="file" id="pfxFile" accept="image/*" hidden>
+          <div class="pfx-who">
+            <div class="pfx-nm">${esc(p.full_name)}</div>
+            <div class="pfx-sub">${roleLabel(p.role)} · @${esc(p.login)}</div>
+          </div>
         </div>
+        <div class="pfx-grid">
+          <div class="pfx-field"><label>Имя</label>
+            <input id="pfxFirst" value="${esc(firstName)}" placeholder="Имя" autocomplete="given-name"></div>
+          <div class="pfx-field"><label>Фамилия</label>
+            <input id="pfxLast" value="${esc(lastName)}" placeholder="Фамилия" autocomplete="family-name"></div>
+        </div>
+        <div class="pfx-field"><label>Номер телефона</label>
+          <div class="pfx-phone">
+            <span class="pfx-prefix">🇺🇿 +998</span>
+            <input id="pfxPhone" inputmode="numeric" placeholder="__ ___ __ __" value="${esc(uzPhoneMask(p.phone || ''))}">
+          </div>
+        </div>
+        ${p.role === 'SE' ? `<div class="pfx-meta">
+          <div><span>Точка</span><b>${esc(p.point_name || '—')}</b></div>
+          <div><span>BRE</span><b>${esc(p.bre_name || '—')}${p.bre_phone ? ` · ${esc(p.bre_phone)}` : ''}</b></div>
+          <div><span>СПВ</span><b>${esc(p.spv_name || '—')}${p.spv_phone ? ` · ${esc(p.spv_phone)}` : ''}</b></div>
+        </div>` : ''}
+        <button class="pfx-save" id="pfxSave">Сохранить изменения</button>
+        <div class="pfx-lock"><i data-lucide="lock"></i> Смена пароля — только через администратора</div>
       </div>
-      <div class="muted" style="font-size:12px;margin:10px 0 4px">Цвет аватара</div>
-      <div class="row wrap" id="pfColors" style="gap:8px">
-        ${AVATAR_COLORS.map((c) => `<div data-color="${c}" style="width:26px;height:26px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${p.avatar_color === c ? 'var(--ink)' : 'transparent'}"></div>`).join('')}
-      </div>
-      ${p.role === 'SE' ? `<div class="stat-line" style="margin-top:16px"><span>Точка</span><b>${esc(p.point_name || '—')}</b></div>
-        <div class="stat-line"><span>BRE</span><b>${esc(p.bre_name || '—')}</b></div>
-        <div class="stat-line"><span>Телефон BRE</span><b>${esc(p.bre_phone || '—')}</b></div>
-        <div class="stat-line"><span>СПВ</span><b>${esc(p.spv_name || '—')}</b></div>
-        <div class="stat-line"><span>Телефон СПВ</span><b>${esc(p.spv_phone || '—')}</b></div>` : ''}
-      <div class="muted" style="font-size:12px;margin:16px 0 4px">Мой телефон</div>
-      <input class="qty-input" id="pfPhone" style="width:100%" placeholder="+998 __ ___ __ __" value="${esc(p.phone || '')}">
-      <div class="muted" style="font-size:12px;margin:14px 0 0;display:flex;align-items:center;gap:7px">
-        <i data-lucide="lock"></i> Смена пароля — только через администратора</div>
-      <div class="row" style="margin-top:18px"><button class="btn ok" id="pfSave">Сохранить</button></div>
     </div>
   </div>`);
   v.appendChild(body);
   if (window.lucide) lucide.createIcons();
-  let color = p.avatar_color || null;
-  body.querySelectorAll('[data-color]').forEach((c) => c.onclick = () => {
-    color = c.dataset.color;
-    body.querySelectorAll('[data-color]').forEach((x) => x.style.border = '2px solid transparent');
-    c.style.border = '2px solid var(--ink)';
-    $('#pfAvatar', body).style.background = color;
+
+  // avatar: click -> file picker -> resize to 256px -> live preview
+  let avatar; // undefined = не менять
+  const ava = $('#pfxAva', body), file = $('#pfxFile', body);
+  ava.onclick = () => file.click();
+  file.onchange = () => {
+    const f = file.files && file.files[0]; if (!f) return;
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 256 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      avatar = c.toDataURL('image/jpeg', .85);
+      ava.innerHTML = `<img src="${avatar}" alt=""><div class="pfx-ava-hover">${camSvg}</div>`;
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(f);
+  };
+
+  // авто-маска телефона
+  const ph = $('#pfxPhone', body);
+  ph.addEventListener('input', () => {
+    const pos = ph.value.length === ph.selectionStart; // курсор в конце — можно переформатировать
+    ph.value = uzPhoneMask(ph.value);
+    if (!pos) ph.setSelectionRange(ph.value.length, ph.value.length);
   });
-  $('#pfSave', body).onclick = async () => {
+
+  $('#pfxSave', body).onclick = async () => {
+    const digits = ph.value.replace(/\D/g, '');
     try {
       const updated = await api('/users/me/profile', { method: 'PUT', body: {
-        phone: $('#pfPhone', body).value, avatar_color: color,
+        full_name: `${$('#pfxFirst', body).value.trim()} ${$('#pfxLast', body).value.trim()}`.trim(),
+        phone: digits ? '+998 ' + uzPhoneMask(digits) : null,
+        ...(avatar !== undefined ? { avatar } : {}),
       } });
       Object.assign(App.user, updated);
       toast('Профиль сохранён', 'ok');
@@ -2466,7 +2511,7 @@ async function viewUsers(v) {
         <div class="profile-grid">${us.map((u) => `
           <div class="card profile-card ${u.status === 'blocked' ? 'is-blocked' : ''}">
             <div class="row" style="gap:13px">
-              <div class="avatar pf-avatar" style="${u.avatar_color ? `background:${esc(u.avatar_color)}` : ''}">${esc(initials(u.full_name))}</div>
+              <div class="avatar pf-avatar" style="${u.avatar_color ? `background:${esc(u.avatar_color)}` : ''}">${u.avatar ? `<img src="${u.avatar}" alt="">` : esc(initials(u.full_name))}</div>
               <div style="flex:1;min-width:0">
                 <div class="pf-name">${esc(u.full_name)}</div>
                 <div class="muted" style="font-size:12.5px">@${esc(u.login)}</div>

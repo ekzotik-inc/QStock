@@ -34,17 +34,23 @@ router.get('/me/profile', (req, res) => {
     spv_name: point ? point.spv_name : null, spv_phone: point ? point.spv_phone : null });
 });
 
-// Self-service: phone and avatar color only. Passwords are changed exclusively
-// by the administrator (via PUT /users/:id); name/role/status stay admin-only too.
+// Self-service: name, phone, avatar (photo/color). Passwords are changed
+// exclusively by the administrator (via PUT /users/:id); role/status admin-only.
 router.put('/me/profile', (req, res) => {
-  const { phone, avatar_color } = req.body || {};
+  const { full_name, phone, avatar_color, avatar } = req.body || {};
   const u = req.user;
-  db.prepare('UPDATE users SET phone = ?, avatar_color = ? WHERE id = ?').run(
+  if (avatar && (!/^data:image\/(png|jpe?g|webp);base64,/.test(avatar) || avatar.length > 300000)) {
+    return res.status(400).json({ error: 'Фото слишком большое или в неподдерживаемом формате' });
+  }
+  db.prepare('UPDATE users SET full_name = ?, phone = ?, avatar_color = ?, avatar = ? WHERE id = ?').run(
+    full_name != null ? String(full_name).trim() || u.full_name : u.full_name,
     phone != null ? String(phone).trim() || null : u.phone,
     avatar_color != null ? String(avatar_color) || null : u.avatar_color,
+    avatar !== undefined ? avatar : u.avatar,
     u.id
   );
-  audit({ userId: u.id, action: 'profile_update', entity: 'user', newValue: { phone, avatar_color }, ip: req.ip });
+  audit({ userId: u.id, action: 'profile_update', entity: 'user',
+    newValue: { full_name, phone, avatar_color, avatar_changed: avatar !== undefined }, ip: req.ip });
   res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(u.id)));
 });
 

@@ -80,11 +80,19 @@ async function loginAs(page, login, password) {
       const after = await eveningOf();
       check('UI-SE-SALE-LIVE', after === instant, `evening persisted ${after}`);
 
-      // Списание/возврат: submit a request, it appears in "Мои заявки"
-      await page.click('.nav a[data-route="writeoff"]'); await page.waitForTimeout(500);
-      check('UI-SE-WRITEOFF-FORM', await page.isVisible('#wSend'), 'writeoff/return request form visible');
-      await page.fill('#wQty', '2'); await page.click('#wSend'); await page.waitForTimeout(700);
-      check('UI-SE-WRITEOFF-REQ', await page.isVisible('.pill.inv'), 'request shows as pending');
+      // «Списание / возврат» убрано из навигации SE — заявка создаётся через API
+      // (функция осталась для BRE-цепочки согласования), проверяем отсутствие вкладки
+      const seNavW = (await page.$$eval('.nav a', (e) => e.map((x) => x.dataset.route))).join('|');
+      check('UI-SE-NO-WRITEOFF-NAV', !seNavW.includes('writeoff'), 'writeoff tab removed from SE nav');
+      const reqOk = await page.evaluate(async () => {
+        const skus = await (await fetch('/api/skus', { credentials: 'include' })).json();
+        const r = await fetch('/api/requests', { method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sku_id: skus[0].id, type: 'writeoff', qty: 2 }) });
+        return r.ok;
+      });
+      check('UI-SE-WRITEOFF-REQ', reqOk, 'writeoff request created via API');
+      await page.waitForTimeout(400);
 
       // BRE approves while the shift is open
       const brePage = await (await browser.newContext()).newPage();
