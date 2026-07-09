@@ -92,11 +92,15 @@ io.on('connection', (socket) => {
 });
 
 rt.init(io);
-seedIfEmpty();   // create demo admin on a fresh database (e.g. first cloud deploy)
-scheduler.start();
 
+// Bind the port first so the platform health check passes immediately, then do
+// the (idempotent) seeding — a seeding hiccup must never keep the app from starting.
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`QStock running on http://localhost:${PORT}`));
+server.listen(PORT, () => {
+  console.log(`QStock running on http://localhost:${PORT}`);
+  try { seedIfEmpty(); } catch (e) { console.error('Seeding failed (continuing):', e); }
+  try { scheduler.start(); } catch (e) { console.error('Scheduler failed to start:', e); }
+});
 
 function parseCookies(str) {
   const out = {};
