@@ -14,14 +14,14 @@ router.get('/me/profile', (req, res) => {
   let point = null;
   if (u.role === 'SE') {
     let p = db.prepare(
-      `SELECT p.id, p.name, p.bre_id, b.full_name AS bre_name, b.phone AS bre_phone
+      `SELECT p.id, p.name, p.bre_id, p.spv_name, p.spv_phone, b.full_name AS bre_name, b.phone AS bre_phone
        FROM point_se ps JOIN points p ON p.id = ps.point_id
        LEFT JOIN users b ON b.id = p.bre_id
        WHERE ps.se_id = ? LIMIT 1`
     ).get(u.id);
     if (!p) {
       p = db.prepare(
-        `SELECT p.id, p.name, p.bre_id, b.full_name AS bre_name, b.phone AS bre_phone
+        `SELECT p.id, p.name, p.bre_id, p.spv_name, p.spv_phone, b.full_name AS bre_name, b.phone AS bre_phone
          FROM shifts sh JOIN points p ON p.id = sh.point_id
          LEFT JOIN users b ON b.id = p.bre_id
          WHERE sh.opened_by = ? ORDER BY sh.opened_at DESC LIMIT 1`
@@ -30,7 +30,8 @@ router.get('/me/profile', (req, res) => {
     point = p || null;
   }
   res.json({ ...publicUser(u), point_name: point ? point.name : null,
-    supervisor_name: point ? point.bre_name : null, supervisor_phone: point ? point.bre_phone : null });
+    bre_name: point ? point.bre_name : null, bre_phone: point ? point.bre_phone : null,
+    spv_name: point ? point.spv_name : null, spv_phone: point ? point.spv_phone : null });
 });
 
 // Self-service: phone, avatar color, own password. Name/role/status stay admin-only.

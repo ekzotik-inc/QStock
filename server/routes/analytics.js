@@ -172,7 +172,7 @@ function pointRow(pid, from, to) {
     lastUpdate = db.prepare('SELECT MAX(created_at) m FROM movements WHERE shift_id=?').get(shift.id).m || shift.opened_at;
   }
   return {
-    point_id: pid, name: p.name, bre_name: p.bre_name, se,
+    point_id: pid, name: p.name, bre_name: p.bre_name, spv_name: p.spv_name, se,
     shift_status: shift ? 'open' : 'closed', sales_qty: sales.q, sales_value: sales.v,
     stock_value: stockValue, last_update: lastUpdate,
   };

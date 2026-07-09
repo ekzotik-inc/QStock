@@ -6,11 +6,11 @@
 const db = require('./db');
 const { hashPassword } = require('./auth');
 
-function ensureUser(full_name, login, password, role, status = 'active') {
+function ensureUser(full_name, login, password, role, status = 'active', phone = null) {
   let u = db.prepare('SELECT * FROM users WHERE login = ?').get(login);
   if (!u) {
-    db.prepare('INSERT INTO users (full_name, login, password_hash, role, status) VALUES (?, ?, ?, ?, ?)')
-      .run(full_name, login, hashPassword(password), role, status);
+    db.prepare('INSERT INTO users (full_name, login, password_hash, role, status, phone) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(full_name, login, hashPassword(password), role, status, phone);
     u = db.prepare('SELECT * FROM users WHERE login = ?').get(login);
     console.log(`+ user ${login} / ${password} (${role})`);
   }
@@ -23,7 +23,7 @@ const ts = (d, hhmm) => `${d} ${hhmm}:00`;
 
 function seed() {
   const admin = ensureUser('Администратор', 'admin', 'admin123', 'ADMIN');
-  const bre = ensureUser('Иванов Б.Р.', 'bre', 'bre123', 'BRE');
+  const bre = ensureUser('Иванов Б.Р.', 'bre', 'bre123', 'BRE', 'active', '+998 90 111 22 33');
   ensureUser('Петров С.Э.', 'se', 'se123', 'SE');
   ensureUser('Сидоров С.Э.', 'se2', 'se123', 'SE');
 
@@ -177,11 +177,12 @@ function doneInventory(pid, shiftId, user, ago) {
   return invId;
 }
 
-function point(name, address, bre, maxSe, mode) {
+function point(name, address, bre, maxSe, mode, spv) {
   const existing = db.prepare('SELECT id FROM points WHERE name=?').get(name);
   if (existing) return existing.id;
-  return db.prepare(`INSERT INTO points (name, address, bre_id, max_se, sale_mode, shift_end_time)
-    VALUES (?, ?, ?, ?, ?, ?)`).run(name, address, bre.id, maxSe, mode, '22:00').lastInsertRowid;
+  return db.prepare(`INSERT INTO points (name, address, bre_id, max_se, sale_mode, shift_end_time, spv_name, spv_phone)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(name, address, bre.id, maxSe, mode, '22:00',
+    spv ? spv[0] : null, spv ? spv[1] : null).lastInsertRowid;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +192,7 @@ function seedDemo(admin, bre) {
   if (db.prepare("SELECT 1 FROM points WHERE name='Compass'").get()) return; // already seeded
   console.log('+ demo dataset (points, history, tasks, inventories, logs)…');
 
-  const bre2 = ensureUser('Ковалёв Б.Р.', 'bre2', 'bre123', 'BRE');
+  const bre2 = ensureUser('Ковалёв Б.Р.', 'bre2', 'bre123', 'BRE', 'active', '+998 90 444 55 66');
   const petrov = db.prepare("SELECT * FROM users WHERE login='se'").get();
   const sidorov = db.prepare("SELECT * FROM users WHERE login='se2'").get();
   const nikita = ensureUser('Никита Мозин', 'nikita', 'se123', 'SE');
@@ -207,12 +208,14 @@ function seedDemo(admin, bre) {
   const tx = db.transaction(() => {
     // ---- points -----------------------------------------------------------
     const existingCentral = db.prepare("SELECT id FROM points WHERE name='ТТ Центральная'").get();
+    const spv1 = ['Рустамов Улугбек Спв.', '+998 90 123 45 67'];
+    const spv2 = ['Каримова Дилноза Спв.', '+998 90 765 43 21'];
     const central = existingCentral ? existingCentral.id
-      : point('ТТ Центральная', 'г. Ташкент, пр. Амира Темура, 1', bre, 2, 'per_sale');
-    const compass = point('Compass', 'г. Ташкент, ТРЦ Compass, 2 этаж', bre, 2, 'per_sale');
-    const riverside = point('ТРЦ Riverside', 'г. Ташкент, наб. Анхор, ТРЦ Riverside', bre2, 2, 'per_sale');
-    const chorsu = point('Chorsu Bazaar', 'г. Ташкент, Чорсу, торговый купол', bre, 2, 'summary');
-    const mega = point('Mega Planet', 'г. Ташкент, ул. Мустакиллик, ТРЦ Mega Planet', bre2, 2, 'per_sale');
+      : point('ТТ Центральная', 'г. Ташкент, пр. Амира Темура, 1', bre, 2, 'per_sale', spv1);
+    const compass = point('Compass', 'г. Ташкент, ТРЦ Compass, 2 этаж', bre, 2, 'per_sale', spv1);
+    const riverside = point('ТРЦ Riverside', 'г. Ташкент, наб. Анхор, ТРЦ Riverside', bre2, 2, 'per_sale', spv2);
+    const chorsu = point('Chorsu Bazaar', 'г. Ташкент, Чорсу, торговый купол', bre, 2, 'summary', spv1);
+    const mega = point('Mega Planet', 'г. Ташкент, ул. Мустакиллик, ТРЦ Mega Planet', bre2, 2, 'per_sale', spv2);
 
     // ---- shift history ----------------------------------------------------
     const hCentral = genHistory(central, [[petrov, sidorov]], { days: 12, lastState: 'open' });
