@@ -145,4 +145,33 @@ router.post('/:id/disconnect', authRequired, requireRole('SE'), (req, res) => {
   res.json({ ok: true });
 });
 
+// Current per-SKU stock for a point's open shift (for the "остаток по SKU" modal).
+router.get('/:id/stock', authRequired, (req, res) => {
+  const id = Number(req.params.id);
+  if (req.user.role !== 'SE' && !canSeePoint(req.user, id)) {
+    return res.status(403).json({ error: 'Нет доступа к точке' });
+  }
+  const point = db.prepare('SELECT id, name FROM points WHERE id=?').get(id);
+  if (!point) return res.status(404).json({ error: 'Не найдено' });
+  const shift = db.prepare(`SELECT id FROM shifts WHERE point_id=? AND status='open' ORDER BY id DESC LIMIT 1`).get(id);
+  const rows = [];
+  let belowMin = 0, critical = 0, totalValue = 0;
+  if (shift) {
+    const lines = db.prepare(`SELECT ss.*, sk.name, sk.category, sk.min_stock, sk.price
+      FROM shift_stock ss JOIN skus sk ON sk.id=ss.sku_id WHERE ss.shift_id=? AND sk.active=1`).all(shift.id);
+    for (const l of lines) {
+      const cur = currentStock(l);
+      const min = l.min_stock || 0;
+      const status = min > 0 && cur <= min ? (cur <= min / 2 ? 'critical' : 'low') : 'ok';
+      if (status === 'low') belowMin++;
+      if (status === 'critical') critical++;
+      totalValue += cur * (l.price || 0);
+      rows.push({ sku_id: l.sku_id, name: l.name, category: l.category, current: cur, min_stock: min, price: l.price, status });
+    }
+    rows.sort((a, b) => ({ critical: 0, low: 1, ok: 2 }[a.status] - { critical: 0, low: 1, ok: 2 }[b.status]) || (a.category || '').localeCompare(b.category || ''));
+  }
+  res.json({ point_id: id, point_name: point.name, has_shift: !!shift,
+    summary: { total: rows.length, below_min: belowMin, critical, value: totalValue }, rows });
+});
+
 module.exports = { router, pointSummary };

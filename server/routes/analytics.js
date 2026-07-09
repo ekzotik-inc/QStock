@@ -61,15 +61,12 @@ router.get('/dashboard', authRequired, (req, res) => {
   const table = ids.map((pid) => pointRow(pid, from, to));
 
   // charts
-  // Sales-by-day shows a trend: default to a trailing 14-day window even though
-  // the KPI tiles reflect "today", unless an explicit date range was requested.
-  const chartFrom = date_from || (() => { const d = new Date(); d.setDate(d.getDate() - 13); return d.toISOString().slice(0, 10); })();
-  const salesByDay = db.prepare(
-    `SELECT date(sa.created_at) d, COALESCE(SUM(sa.qty*sa.price),0) v, COALESCE(SUM(sa.qty),0) q
-     FROM sales sa JOIN shifts sh ON sh.id=sa.shift_id
-     WHERE sh.point_id IN (${ph}) AND date(sa.created_at) BETWEEN ? AND ?
-     GROUP BY date(sa.created_at) ORDER BY d`
-  ).all(...ids, chartFrom, to);
+  // Sales-by-day: a period switcher (week / month / year) with period-specific
+  // X labels; without a period it defaults to a trailing 14-day window.
+  const salesByDay = salesTrend(ids, ph, req.query.chart_period, date_from, to);
+
+  // day-over-day deltas for KPI tiles (today vs yesterday, %)
+  const deltas = computeDeltas(ids, ph);
 
   const salesBySku = db.prepare(
     `SELECT sk.name, COALESCE(SUM(sa.qty),0) q, COALESCE(SUM(sa.qty*sa.price),0) v
@@ -96,12 +93,69 @@ router.get('/dashboard', authRequired, (req, res) => {
       sales_value: sales.v,
       stock_value: stockValue,
     },
+    deltas,
     low_stock: lowStock,
     unclosed_shifts: unclosed,
     table,
     charts: { sales_by_day: salesByDay, sales_by_sku: salesBySku, stock_by_sku: stockBySku, point_ranking: pointRanking },
   });
 });
+
+// Sales trend with period-specific buckets & labels.
+function salesTrend(ids, ph, period, dateFrom, to) {
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const sumRange = (a, b) => db.prepare(
+    `SELECT COALESCE(SUM(sa.qty*sa.price),0) v, COALESCE(SUM(sa.qty),0) q
+     FROM sales sa JOIN shifts sh ON sh.id=sa.shift_id
+     WHERE sh.point_id IN (${ph}) AND date(sa.created_at) BETWEEN ? AND ?`).get(...ids, a, b);
+
+  if (period === 'week') {
+    const wd = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const out = [];
+    for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const s = iso(d); const r = sumRange(s, s); out.push({ d: wd[d.getDay()], v: r.v, q: r.q }); }
+    return out;
+  }
+  if (period === 'month') {
+    const now = new Date(); const y = now.getFullYear(), m = now.getMonth();
+    const last = new Date(y, m + 1, 0).getDate();
+    const bounds = [[1, 5], [6, 10], [11, 15], [16, 20], [21, 25], [26, last]];
+    const mm = String(m + 1).padStart(2, '0');
+    return bounds.map(([a, b]) => {
+      const r = sumRange(`${y}-${mm}-${String(a).padStart(2, '0')}`, `${y}-${mm}-${String(b).padStart(2, '0')}`);
+      return { d: `${a}–${b}`, v: r.v, q: r.q };
+    });
+  }
+  if (period === 'year') {
+    const mon = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    const y = new Date().getFullYear();
+    return mon.map((name, i) => {
+      const mm = String(i + 1).padStart(2, '0'); const last = new Date(y, i + 1, 0).getDate();
+      const r = sumRange(`${y}-${mm}-01`, `${y}-${mm}-${last}`);
+      return { d: name, v: r.v, q: r.q };
+    });
+  }
+  // default: trailing 14 days
+  const from = dateFrom || (() => { const d = new Date(); d.setDate(d.getDate() - 13); return iso(d); })();
+  return db.prepare(
+    `SELECT date(sa.created_at) d, COALESCE(SUM(sa.qty*sa.price),0) v, COALESCE(SUM(sa.qty),0) q
+     FROM sales sa JOIN shifts sh ON sh.id=sa.shift_id
+     WHERE sh.point_id IN (${ph}) AND date(sa.created_at) BETWEEN ? AND ?
+     GROUP BY date(sa.created_at) ORDER BY d`
+  ).all(...ids, from, to);
+}
+
+// Today-vs-yesterday percentage deltas for the KPI tiles.
+function computeDeltas(ids, ph) {
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const t = new Date(); const y = new Date(); y.setDate(y.getDate() - 1);
+  const q = (d) => db.prepare(
+    `SELECT COALESCE(SUM(sa.qty),0) q, COALESCE(SUM(sa.qty*sa.price),0) v
+     FROM sales sa JOIN shifts sh ON sh.id=sa.shift_id
+     WHERE sh.point_id IN (${ph}) AND date(sa.created_at)=?`).get(...ids, d);
+  const today = q(iso(t)), yest = q(iso(y));
+  const pct = (a, b) => b > 0 ? Math.round(((a - b) / b) * 100) : (a > 0 ? 100 : 0);
+  return { sales_qty: pct(today.q, yest.q), sales_value: pct(today.v, yest.v) };
+}
 
 function pointRow(pid, from, to) {
   const p = db.prepare(`SELECT p.*, b.full_name bre_name FROM points p LEFT JOIN users b ON b.id=p.bre_id WHERE p.id=?`).get(pid);
@@ -151,6 +205,7 @@ function computeUnclosed(ids) {
 function emptyDashboard() {
   return {
     widgets: { open_shifts: 0, closed_shifts: 0, active_se: 0, sales_qty: 0, sales_value: 0, stock_value: 0 },
+    deltas: { sales_qty: 0, sales_value: 0 },
     low_stock: [], unclosed_shifts: [], table: [],
     charts: { sales_by_day: [], sales_by_sku: [], stock_by_sku: [], point_ranking: [] },
   };

@@ -71,6 +71,38 @@ function buildXlsx(rows, sheetName = 'Отчёт') {
   return zip(files);
 }
 
+// Sanitize a worksheet name: Excel forbids : \ / ? * [ ] and caps at 31 chars.
+function safeSheetName(name, used) {
+  let s = String(name || 'Лист').replace(/[:\\/?*[\]]/g, ' ').trim().slice(0, 31) || 'Лист';
+  let base = s, n = 2;
+  while (used.has(s.toLowerCase())) { const suf = ' ' + n++; s = base.slice(0, 31 - suf.length) + suf; }
+  used.add(s.toLowerCase());
+  return s;
+}
+
+// Multi-sheet workbook. sheets = [{ name, rows }]. rows = array of arrays.
+function buildXlsxMulti(sheets) {
+  const B = (s) => Buffer.from(s, 'utf8');
+  const used = new Set();
+  const norm = (sheets && sheets.length ? sheets : [{ name: 'Отчёт', rows: [] }])
+    .map((sh) => ({ name: safeSheetName(sh.name, used), rows: sh.rows || [] }));
+
+  const contentOverrides = norm.map((_, i) =>
+    `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('');
+  const sheetTags = norm.map((sh, i) => `<sheet name="${escXml(sh.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('');
+  const wbRels = norm.map((_, i) =>
+    `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('');
+
+  const files = [
+    { name: '[Content_Types].xml', data: B(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${contentOverrides}</Types>`) },
+    { name: '_rels/.rels', data: B(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`) },
+    { name: 'xl/workbook.xml', data: B(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheetTags}</sheets></workbook>`) },
+    { name: 'xl/_rels/workbook.xml.rels', data: B(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${wbRels}</Relationships>`) },
+    ...norm.map((sh, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: B(sheetXml(sh.rows)) })),
+  ];
+  return zip(files);
+}
+
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 // Express helper: send rows as an .xlsx download (ASCII filename to keep headers valid).
@@ -81,4 +113,12 @@ function sendXlsx(res, filename, rows, sheetName) {
   res.send(buf);
 }
 
-module.exports = { buildXlsx, sendXlsx, XLSX_MIME };
+// Express helper: send a multi-sheet workbook as an .xlsx download.
+function sendXlsxMulti(res, filename, sheets) {
+  const buf = buildXlsxMulti(sheets);
+  res.setHeader('Content-Type', XLSX_MIME);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(buf);
+}
+
+module.exports = { buildXlsx, buildXlsxMulti, sendXlsx, sendXlsxMulti, XLSX_MIME };

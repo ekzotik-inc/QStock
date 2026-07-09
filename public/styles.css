@@ -394,6 +394,34 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 .crit-row td { background: var(--danger-weak); }
 .card.point-crit { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger-weak), var(--shadow-sm); }
 
+/* KPI card: icon-in-circle + delta */
+.kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.kpi-top .label { margin-bottom: 0; }
+.kpi-ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; }
+.kpi-ic svg { width: 19px; height: 19px; }
+.kpi-ic.tone-teal { background: var(--accent-weak); color: var(--accent-ink); }
+.kpi-ic.tone-warn { background: var(--warn-weak); color: var(--warn); }
+.kpi-ic.tone-danger { background: var(--danger-weak); color: var(--danger); }
+.kpi-ic.tone-ok { background: var(--ok-weak); color: var(--ok); }
+.kpi-ic.tone-slate { background: var(--surface-2); color: var(--ink-2); }
+.kpi-delta { margin-top: 6px; font-size: 12.5px; font-weight: 800; }
+.kpi-delta.up { color: var(--ok); }
+.kpi-delta.down { color: var(--danger); }
+.kpi-link { color: var(--accent-ink); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.kpi-link:hover { color: var(--accent-2); }
+.warn-num { color: var(--warn); }
+
+/* stock-by-SKU modal summary + progress track */
+.stock-sum { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 4px; }
+.stock-sum > div { background: var(--surface-2); border-radius: var(--radius-sm); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.stock-sum span { font-size: 12px; }
+.stock-sum b { font-size: 20px; font-weight: 800; }
+.track { background: var(--surface-2); border-radius: 999px; height: 9px; overflow: hidden; }
+.track .fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent-2), var(--accent)); transition: width .5s var(--ease); }
+.track .fill.critical { background: var(--danger); }
+.track .fill.low { background: var(--warn); }
+.track .fill.ok { background: var(--ok); }
+
 /* ---------- SE main-page category tabs ---------- */
 .se-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .se-tab { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);

@@ -433,15 +433,16 @@ async function viewDashboard(v) {
   $('#exp').onclick = () => window.open('/api/analytics/export.xlsx', '_blank');
   bindBell();
   const load = async () => {
-    const d = await api('/analytics/dashboard');
+    const per = App.state.dashPeriod || 'week';
+    const d = await api('/analytics/dashboard?chart_period=' + per);
     body.innerHTML = `
       <div class="kpis">
-        ${kpi('Открытых смен', d.widgets.open_shifts)}
-        ${kpi('Закрытых смен', d.widgets.closed_shifts)}
-        ${kpi('Активных SE', d.widgets.active_se)}
-        ${kpi('Продажи (шт)', num(d.widgets.sales_qty))}
-        ${kpi('Сумма продаж', money(d.widgets.sales_value), true)}
-        ${kpi('Стоимость остатков', money(d.widgets.stock_value), true)}
+        ${kpi('Открытых смен', d.widgets.open_shifts, { icon: 'clock', tone: 'teal' })}
+        ${kpi('Закрытых смен', d.widgets.closed_shifts, { icon: 'check-circle', tone: 'ok' })}
+        ${kpi('Активных SE', d.widgets.active_se, { icon: 'users', tone: 'slate' })}
+        ${kpi('Продажи (шт)', num(d.widgets.sales_qty), { icon: 'shopping-bag', tone: 'teal', delta: d.deltas && d.deltas.sales_qty })}
+        ${kpi('Сумма продаж', money(d.widgets.sales_value), { accent: true, icon: 'wallet', tone: 'teal', delta: d.deltas && d.deltas.sales_value })}
+        ${kpi('Стоимость остатков', money(d.widgets.stock_value), { accent: true, icon: 'layers', tone: 'warn' })}
       </div>
       ${d.low_stock.length ? `<div class="card point-crit">
         <div class="row between wrap"><h3 style="margin:0">⚠️ Критически низкий остаток <span class="crit-badge">везти срочно · ${d.low_stock.length}</span></h3>
@@ -457,22 +458,69 @@ async function viewDashboard(v) {
         <table><thead><tr><th>Точка</th><th>BRE</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
         <tbody>${d.table.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td>
           <td>${statusPill(r.shift_status)}</td><td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td>
-          <td class="num">${money(r.stock_value)}</td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
+          <td class="num"><span class="kpi-link" data-stock-point="${r.point_id}" data-stock-name="${esc(r.name)}">${money(r.stock_value)}</span></td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
       </div>
       <div class="cards">
-        ${chartCard('Продажи по дням', d.charts.sales_by_day.map((x) => [x.d, x.v]), 'line')}
+        <div class="card"><div class="row between" style="align-items:center">
+          <h3 style="margin:0">Продажи по дням</h3>
+          <div class="segmented sm" id="dashPeriod">
+            <button data-per="week" class="seg-opt ${per === 'week' ? 'on' : ''}">Неделя</button>
+            <button data-per="month" class="seg-opt ${per === 'month' ? 'on' : ''}">Месяц</button>
+            <button data-per="year" class="seg-opt ${per === 'year' ? 'on' : ''}">Год</button>
+          </div></div>
+          ${chartCanvas(d.charts.sales_by_day.map((x) => [x.d, x.v]), 'line')}</div>
         ${chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
         ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
         ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}
       </div>`;
     mountCharts();
+    if (window.lucide) lucide.createIcons();
     body.querySelectorAll('[data-shift]').forEach((a) => a.onclick = () => openShift(Number(a.dataset.shift)));
+    body.querySelectorAll('[data-stock-point]').forEach((a) => a.onclick = () => openStockModal(Number(a.dataset.stockPoint), a.dataset.stockName));
+    body.querySelectorAll('#dashPeriod button').forEach((b) => b.onclick = () => { App.state.dashPeriod = b.dataset.per; load(); });
     const gp = $('#goProc', body); if (gp) gp.onclick = () => { App.route = 'procurement'; renderShell(); };
   };
   App._refresh = load; await load();
 }
-const kpi = (label, value, accent) => `<div class="kpi"><div class="label">${label}</div><div class="value ${accent ? 'accent' : ''}">${value}</div></div>`;
+// kpi(label, value) | kpi(label, value, true) | kpi(label, value, { accent, icon, tone, delta, click })
+function kpi(label, value, opts = {}) {
+  if (typeof opts === 'boolean') opts = { accent: opts };
+  const { accent, icon, tone = 'teal', delta, click } = opts;
+  const ic = icon ? `<span class="kpi-ic tone-${tone}"><i data-lucide="${icon}"></i></span>` : '';
+  const d = (delta === 0 || delta) ? `<div class="kpi-delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '↑' : '↓'} ${Math.abs(delta)}% к вчера</div>` : '';
+  const valCls = `value ${accent ? 'accent' : ''} ${click ? 'kpi-link' : ''}`;
+  const valAttr = click ? ` data-stock-point="${click.pointId}" data-stock-name="${esc(click.pointName)}"` : '';
+  return `<div class="kpi"><div class="kpi-top"><div class="label">${label}</div>${ic}</div>
+    <div class="${valCls}"${valAttr}>${value}</div>${d}</div>`;
+}
 const statusPill = (s) => s === 'open' ? `<span class="pill open"><span class="dot"></span>Открыта</span>` : `<span class="pill closed">Закрыта</span>`;
+
+// Modal: current stock by SKU for a point (opened from clickable "Остаток" values).
+async function openStockModal(pointId, pointName) {
+  let d;
+  try { d = await api(`/points/${pointId}/stock`); } catch { toast('Нет доступа к остаткам', 'err'); return; }
+  const pill = (st) => st === 'critical' ? '<span class="pill closed">критично</span>'
+    : st === 'low' ? '<span class="pill inv">низкий</span>' : '<span class="pill open">в норме</span>';
+  const rows = d.rows.length ? d.rows.map((r) => {
+    const pct = r.min_stock > 0 ? Math.min(100, Math.round(r.current / (r.min_stock * 2) * 100)) : 100;
+    return `<tr class="${r.status === 'critical' ? 'crit-row' : ''}">
+      <td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(r.category || '')}</div></td>
+      <td class="num"><b class="${r.status !== 'ok' ? 'evening-low' : ''}">${num(r.current)}</b> <span class="muted">/ ${num(r.min_stock)}</span></td>
+      <td style="width:120px"><div class="track"><div class="fill ${r.status}" style="width:${pct}%"></div></div></td>
+      <td>${pill(r.status)}</td></tr>`;
+  }).join('') : `<tr><td colspan="4" class="empty">${d.has_shift ? 'Нет позиций' : 'Смена не открыта'}</td></tr>`;
+  modal(`<h3>Остатки · ${esc(pointName || d.point_name)}</h3>
+    <div class="stock-sum">
+      <div><span class="muted">Всего SKU</span><b>${d.summary.total}</b></div>
+      <div><span class="muted">Ниже минимума</span><b class="warn-num">${d.summary.below_min}</b></div>
+      <div><span class="muted">Критично</span><b class="evening-low">${d.summary.critical}</b></div>
+      <div><span class="muted">Стоимость</span><b>${money(d.summary.value)}</b></div>
+    </div>
+    <div class="table-wrap" style="max-height:52vh;overflow:auto;margin-top:14px">
+      <table class="shift-table"><thead><tr><th>SKU</th><th class="num">Остаток / мин</th><th>Уровень</th><th>Статус</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="foot"><button class="btn back" onclick="closeModal()">Закрыть</button></div>`, null, 'wide');
+}
 
 // Charts via Chart.js.
 //   chartCard(title, pairs)         — horizontal bars (tops, rankings)
@@ -481,12 +529,13 @@ const statusPill = (s) => s === 'open' ? `<span class="pill open"><span class="d
 let _chartSeq = 0;
 const _chartQueue = [];
 let _chartInstances = [];
-function chartCard(title, pairs, type = 'bar') {
+function chartCanvas(pairs, type = 'bar') {
   const id = 'ch' + (++_chartSeq);
   _chartQueue.push({ id, pairs, type });
-  return `<div class="card"><h3>${esc(title)}</h3>${pairs.length
-    ? `<div class="chart-box"><canvas id="${id}"></canvas></div>`
-    : '<div class="empty">Нет данных</div>'}</div>`;
+  return pairs.length ? `<div class="chart-box"><canvas id="${id}"></canvas></div>` : '<div class="empty">Нет данных</div>';
+}
+function chartCard(title, pairs, type = 'bar') {
+  return `<div class="card"><h3>${esc(title)}</h3>${chartCanvas(pairs, type)}</div>`;
 }
 function mountCharts() {
   const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -696,7 +745,7 @@ async function viewMyShift(v) {
         <div class="shift-head-stats">
           <div><span class="muted">Продано</span><b id="stSold">${num(t.sales_qty)}</b></div>
           <div><span class="muted">Сумма продаж</span><b id="stValue">${money(t.sales_value)}</b></div>
-          <div><span class="muted">Остаток вечером</span><b id="stCurrent">${num(t.current)}</b></div>
+          <div><span class="muted">Остаток вечером</span><b id="stCurrent" class="kpi-link" data-stock-point="${mine.id}" data-stock-name="${esc(mine.name)}">${num(t.current)}</b></div>
         </div>
       </div>
       ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
@@ -724,6 +773,7 @@ async function viewMyShift(v) {
     const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
     const expBtn = $('#expBtn', v); if (expBtn) expBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.xlsx`, '_blank');
     const swBtn = $('#swPoint', v); if (swBtn) swBtn.onclick = () => switchPointModal(mine);
+    const stC = $('#stCurrent', wrap); if (stC) stC.onclick = () => openStockModal(mine.id, mine.name);
     bindSeTable(wrap, d.shift.id);
     bindTableTools(wrap, d.shift.point_id);
   };
@@ -985,12 +1035,12 @@ async function viewPointMonitor(v) {
         <div class="muted">${esc(p.address || '')} · обновлено ${fmtDate(p.last_update)}</div>
       </div>
       <div class="kpis">
-        ${kpi('Продажи сегодня', num(p.sales_qty))}
-        ${kpi('Сумма продаж', money(p.sales_value), true)}
-        ${kpi('Стоимость остатка', money(p.stock_value), true)}
-        ${kpi('Подключено SE', p.se_count + ' / ' + p.max_se)}
-        ${kpi('Низкий остаток', p.low_stock_count)}
-        ${kpi('Смена', p.shift_status === 'open' ? 'Открыта' : 'Закрыта')}
+        ${kpi('Продажи сегодня', num(p.sales_qty), { icon: 'shopping-bag', tone: 'teal' })}
+        ${kpi('Сумма продаж', money(p.sales_value), { accent: true, icon: 'wallet', tone: 'teal' })}
+        ${kpi('Стоимость остатка', money(p.stock_value), { accent: true, icon: 'layers', tone: 'warn', click: { pointId: p.id, pointName: p.name } })}
+        ${kpi('Подключено SE', p.se_count + ' / ' + p.max_se, { icon: 'users', tone: 'slate' })}
+        ${kpi('Низкий остаток', p.low_stock_count, { icon: 'alert-triangle', tone: p.low_stock_count > 0 ? 'danger' : 'ok' })}
+        ${kpi('Смена', p.shift_status === 'open' ? 'Открыта' : 'Закрыта', { icon: 'clock', tone: 'teal' })}
       </div>
       ${shift ? `<div class="cards">
         <div class="card"><h3>Топ продаж сегодня</h3>${topSales.length ? topSales.map((l) => {
@@ -1011,6 +1061,8 @@ async function viewPointMonitor(v) {
         <tbody>${moves.length ? moves.map((m) => `<tr><td>${fmtDate(m.created_at)}</td><td>${opLabel[m.type] || m.type}</td>
           <td>${esc(m.sku_name)}</td><td class="num">${num(m.qty)}</td><td class="num">${num(m.balance_after)}</td><td>${emp(m.user_name)}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">Активности пока нет</td></tr>'}</tbody>
       </table></div>`;
+    if (window.lucide) lucide.createIcons();
+    body.querySelectorAll('[data-stock-point]').forEach((a) => a.onclick = () => openStockModal(Number(a.dataset.stockPoint), a.dataset.stockName));
     const backBtn = $('#backBtn', v); if (backBtn) backBtn.onclick = () => { App.route = App.state.monFrom || 'points'; renderShell(); };
     const detBtn = $('#detBtn', v); if (detBtn) detBtn.onclick = () => { App.state.shiftFrom = 'pointmon'; openShift(p.shift_id); };
   };
@@ -1790,11 +1842,35 @@ async function viewPoints(v) {
   const isAdmin = App.user.role === 'ADMIN';
   v.innerHTML = topbar('Торговые точки', isAdmin ? `<button class="btn sm" id="add">+ Точка</button>` : '');
   bindBell();
-  const body = el('<div class="cards"></div>'); v.appendChild(body);
+  const body = el('<div></div>'); v.appendChild(body);
   if (isAdmin) $('#add').onclick = () => pointForm();
   const load = async () => {
     const points = await api('/points');
-    body.innerHTML = points.map((p) => `<div class="card ${p.low_stock_count > 0 ? 'point-crit' : ''}">
+    let proc = null;
+    try { proc = await api('/procurement?days=7&horizon=7&lead=2&safety=20'); } catch {}
+    const analysis = proc ? proc.points.flatMap((p) => p.rows.map((r) => ({ point: p.point_name, ...r })))
+      .sort((a, b) => (b.critical - a.critical) || (a.current - b.current)).slice(0, 40) : [];
+    const critN = analysis.filter((r) => r.critical).length;
+    const lowN = analysis.length - critN;
+    const panel = analysis.length ? `<div class="card" style="margin-bottom:20px;padding:0;overflow:hidden">
+      <div class="proc-head">
+        <div class="row" style="gap:10px;align-items:center"><h3 style="margin:0">Анализ остатков для закупки</h3>
+          ${critN ? `<span class="crit-badge">критично · ${critN}</span>` : ''}
+          ${lowN ? `<span class="pill inv">низкий · ${lowN}</span>` : ''}</div>
+        <button class="btn secondary sm" id="expAnalysis">Экспорт в Excel (по точкам)</button>
+      </div>
+      <div class="table-wrap" style="max-height:340px;overflow:auto"><table class="shift-table">
+        <thead><tr><th>Точка</th><th>SKU</th><th class="num">Остаток</th><th>Уровень</th><th>Статус</th><th class="num">Заказать</th></tr></thead>
+        <tbody>${analysis.map((r) => {
+    const pct = r.per_day > 0 ? Math.min(100, Math.round(r.current / (r.per_day * 7) * 100)) : 100;
+    return `<tr class="${r.critical ? 'crit-row' : ''}"><td><b>${esc(r.point)}</b></td>
+          <td>${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.category || '')}</div></td>
+          <td class="num"><b class="${r.critical ? 'evening-low' : ''}">${num(r.current)}</b></td>
+          <td style="width:110px"><div class="track"><div class="fill ${r.critical ? 'critical' : 'low'}" style="width:${pct}%"></div></div></td>
+          <td>${r.critical ? '<span class="pill closed">критично</span>' : '<span class="pill inv">низкий</span>'}</td>
+          <td class="num">${r.reorder > 0 ? `<span class="reorder-pill">+${num(r.reorder)}</span>` : '—'}</td></tr>`;
+  }).join('')}</tbody></table></div></div>` : '';
+    body.innerHTML = panel + '<div class="cards">' + points.map((p) => `<div class="card ${p.low_stock_count > 0 ? 'point-crit' : ''}">
       <div class="row between"><div class="row" style="gap:8px"><h3 style="margin:0">${esc(p.name)}</h3>
         ${p.low_stock_count > 0 ? `<span class="crit-badge">малые остатки · ${p.low_stock_count}</span>` : ''}</div>
         ${p.needs_inventory ? '<span class="pill inv">инвент.</span>' : statusPill(p.shift_status)}</div>
@@ -1802,7 +1878,7 @@ async function viewPoints(v) {
       <div style="margin:12px 0">
         <div class="stat-line"><span>Подключено SE</span><b>${p.se_connected.length ? p.se_connected.map((s) => emp(s.full_name)).join(', ') : `0/${p.max_se}`}</b></div>
         <div class="stat-line"><span>Продажи сегодня</span><b>${num(p.sales_qty)} · ${money(p.sales_value)}</b></div>
-        <div class="stat-line"><span>Стоимость остатка</span><b>${money(p.stock_value)}</b></div>
+        <div class="stat-line"><span>Стоимость остатка</span><b><span class="kpi-link" data-stock-point="${p.id}" data-stock-name="${esc(p.name)}">${money(p.stock_value)}</span></b></div>
         <div class="stat-line"><span>Низкий остаток</span><b class="${p.low_stock_count > 0 ? 'evening-low' : ''}">${p.low_stock_count}</b></div>
         <div class="stat-line"><span>Обновлено</span><b>${fmtDate(p.last_update)}</b></div>
       </div>
@@ -1810,7 +1886,9 @@ async function viewPoints(v) {
         <button class="btn sm" data-mon="${p.id}">Монитор</button>
         <button class="btn ghost sm" data-inv="${p.id}" ${p.needs_inventory ? 'disabled' : ''}>Назначить инвентаризацию</button>
         ${isAdmin ? `<button class="btn ghost sm" data-edit="${p.id}">Изменить</button>` : ''}
-      </div></div>`).join('');
+      </div></div>`).join('') + '</div>';
+    const exp = $('#expAnalysis', body); if (exp) exp.onclick = () => window.open('/api/procurement/export.xlsx?days=7&horizon=7&lead=2&safety=20', '_blank');
+    body.querySelectorAll('[data-stock-point]').forEach((a) => a.onclick = () => openStockModal(Number(a.dataset.stockPoint), a.dataset.stockName));
     body.querySelectorAll('[data-mon]').forEach((b) => b.onclick = () => { App.state.monPid = Number(b.dataset.mon); App.state.monFrom = 'points'; App.route = 'pointmon'; renderShell(); });
     body.querySelectorAll('[data-inv]').forEach((b) => b.onclick = async () => { try { await api(`/inventory/assign/${b.dataset.inv}`, { method: 'POST' }); toast('Инвентаризация назначена', 'ok'); load(); } catch {} });
     body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = async () => { const p = points.find((x) => x.id === Number(b.dataset.edit)); pointForm(p); });

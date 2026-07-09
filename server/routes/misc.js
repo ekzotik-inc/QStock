@@ -4,7 +4,7 @@ const db = require('../db');
 const { authRequired, requireRole } = require('../auth');
 const { canSeePoint, visiblePointIds } = require('../access');
 const { currentStock } = require('../util');
-const { sendXlsx } = require('../xlsx');
+const { sendXlsx, sendXlsxMulti } = require('../xlsx');
 
 const router = express.Router();
 
@@ -186,25 +186,37 @@ router.get('/procurement', authRequired, (req, res) => {
     total_reorder: totalReorder, critical_count: criticalCount, points });
 });
 
-// Procurement plan -> Excel
+// Procurement plan -> Excel: a "Тотал Саммари" sheet first, then one sheet per point.
 router.get('/procurement/export.xlsx', authRequired, (req, res) => {
   let ids = visiblePointIds(req.user);
   const pointFilter = Number(req.query.point_id) || null;
   if (pointFilter) ids = ids.filter((i) => i === pointFilter);
-  const header = ['Точка', 'Категория', 'SKU', 'Артикул', 'Остаток', 'Средн./день', 'Нужно', 'Заказать', 'Срочно'];
-  const out = [header];
+  const lead = Math.min(Math.max(Number(req.query.lead) || 0, 0), 90);
+  const isCrit = (r) => { const effLead = r.lead_days != null ? r.lead_days : lead; return r.per_day > 0 && r.current <= r.per_day * Math.max(effLead, 1); };
+
+  const summary = [['Точка', 'Позиций к заказу', 'Всего заказать (шт)', 'Критично', 'Статус']];
+  const pointSheets = [];
+  let totPos = 0, totQty = 0, totCrit = 0;
+  const header = ['Категория', 'SKU', 'Артикул', 'Остаток', 'Средн./день', 'Нужно', 'Заказать', 'Срочно'];
+
   for (const pid of ids) {
     const p = db.prepare('SELECT name FROM points WHERE id=?').get(pid);
     const f = buildForecast(pid, req.query);
-    const lead = Math.min(Math.max(Number(req.query.lead) || 0, 0), 90);
+    const rows = [header];
+    let pos = 0, qty = 0, crit = 0;
     for (const r of f.rows) {
-      if (r.reorder <= 0) continue;
-      const effLead = r.lead_days != null ? r.lead_days : lead;
-      const critical = r.per_day > 0 && r.current <= r.per_day * Math.max(effLead, 1);
-      out.push([p.name, r.category || '', r.name, r.article, r.current, r.per_day, r.recommended, r.reorder, critical ? 'СРОЧНО' : '']);
+      const critical = isCrit(r);
+      if (r.reorder <= 0 && !critical) continue;
+      rows.push([r.category || '', r.name, r.article, r.current, r.per_day, r.recommended, r.reorder, critical ? 'СРОЧНО' : '']);
+      if (r.reorder > 0) { pos++; qty += r.reorder; }
+      if (critical) crit++;
     }
+    totPos += pos; totQty += qty; totCrit += crit;
+    summary.push([p.name, pos, qty, crit, crit ? 'СРОЧНО' : (pos ? 'заказать' : 'обеспечена')]);
+    pointSheets.push({ name: p.name, rows });
   }
-  sendXlsx(res, 'procurement.xlsx', out, 'Закуп');
+  summary.push(['ИТОГО', totPos, totQty, totCrit, '']);
+  sendXlsxMulti(res, 'procurement.xlsx', [{ name: 'Тотал Саммари', rows: summary }, ...pointSheets]);
 });
 
 // Order-request (Запасы) — only positions to reorder -> Excel.
