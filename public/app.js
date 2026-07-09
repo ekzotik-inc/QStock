@@ -1085,7 +1085,7 @@ async function viewPointMonitor(v) {
       <div class="row between wrap" style="margin-bottom:6px">
         <div>${p.needs_inventory ? '<span class="pill inv">инвентаризация</span>' : statusPill(p.shift_status)}
           ${p.se_connected.length ? '· ' + p.se_connected.map((s) => emp(s.full_name)).join(', ') : '<span class="muted">нет подключённых SE</span>'}</div>
-        <div class="muted">${esc(p.address || '')} · BRE: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}</div>
+        <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''} · BRE: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}</div>
       </div>
       <div class="kpis">
         ${kpi('Продажи сегодня', num(p.sales_qty), { icon: 'shopping-bag', tone: 'teal' })}
@@ -1925,9 +1925,11 @@ async function viewPoints(v) {
   }).join('')}</tbody></table></div></div>` : '';
     body.innerHTML = panel + '<div class="cards">' + points.map((p) => `<div class="card ${p.low_stock_count > 0 ? 'point-crit' : ''}">
       <div class="row between"><div class="row" style="gap:8px"><h3 style="margin:0">${esc(p.name)}</h3>
+        ${p.channel ? `<span class="pill closed">${esc(p.channel)}</span>` : ''}
         ${p.low_stock_count > 0 ? `<span class="crit-badge">малые остатки · ${p.low_stock_count}</span>` : ''}</div>
         ${p.needs_inventory ? '<span class="pill inv">инвент.</span>' : statusPill(p.shift_status)}</div>
-      <div class="muted">${esc(p.address || '')} · BRE: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''}</div>
+      <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''}</div>
+      <div class="muted">BRE: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''}</div>
       <div style="margin:12px 0">
         <div class="stat-line"><span>Подключено SE</span><b>${p.se_connected.length ? p.se_connected.map((s) => emp(s.full_name)).join(', ') : `0/${p.max_se}`}</b></div>
         <div class="stat-line"><span>Продажи сегодня</span><b>${num(p.sales_qty)} · ${money(p.sales_value)}</b></div>
@@ -1949,25 +1951,52 @@ async function viewPoints(v) {
   App._refresh = load; await load();
 }
 
+const POINT_CHANNELS = ['IQOS', 'BR', 'BR Mini', 'Street Retail'];
 async function pointForm(p) {
   const bres = await api('/users/by-role/BRE');
+  let lat = p?.lat ?? null, lng = p?.lng ?? null;
   modal(`<h3>${p ? 'Изменить точку' : 'Новая точка'}</h3>
     <div class="field"><label>Название</label><input id="pn" value="${esc(p?.name || '')}"></div>
     <div class="field"><label>Адрес</label><input id="pa" value="${esc(p?.address || '')}"></div>
+    <div class="row"><div class="field" style="flex:1"><label>Телефон точки</label><input id="pph" value="${esc(p?.phone || '')}" placeholder="+998 __ ___ __ __"></div>
+    <div class="field" style="flex:1"><label>Канал</label><select id="pch"><option value="">—</option>${POINT_CHANNELS.map((c) => `<option value="${c}" ${p?.channel === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div></div>
     <div class="field"><label>BRE (следит за точками)</label><select id="pb"><option value="">—</option>${bres.map((b) => `<option value="${b.id}" ${p?.bre_id === b.id ? 'selected' : ''}>${esc(b.full_name)}</option>`).join('')}</select></div>
     <div class="row"><div class="field" style="flex:1"><label>СПВ (следит за BRE)</label><input id="pspn" value="${esc(p?.spv_name || '')}" placeholder="ФИО супервайзера"></div>
     <div class="field" style="flex:1"><label>Телефон СПВ</label><input id="pspp" value="${esc(p?.spv_phone || '')}" placeholder="+998 __ ___ __ __"></div></div>
+    <div class="field"><label>Геолокация</label>
+      <div class="row" style="gap:10px;align-items:center">
+        <button type="button" class="btn secondary sm" id="pGeo">📍 Поделиться геолокацией</button>
+        <span class="muted" id="pGeoVal" style="font-size:12px">${lat != null ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : 'не указана'}</span>
+      </div>
+    </div>
     <div class="row"><div class="field" style="flex:1"><label>Макс. SE</label><input id="pm" type="number" value="${p?.max_se || 2}"></div>
     <div class="field" style="flex:1"><label>Режим продаж</label><select id="ps"><option value="per_sale" ${p?.sale_mode === 'per_sale' ? 'selected' : ''}>По продаже</option><option value="summary" ${p?.sale_mode === 'summary' ? 'selected' : ''}>Суммарно</option></select></div></div>
     <div class="row"><div class="field" style="flex:1"><label>Статус</label><select id="pst"><option value="active" ${p?.status === 'active' ? 'selected' : ''}>Активна</option><option value="inactive" ${p?.status === 'inactive' ? 'selected' : ''}>Неактивна</option></select></div>
     <div class="field" style="flex:1"><label>Время закрытия (HH:MM)</label><input id="pe" value="${esc(p?.shift_end_time || '')}"></div></div>
     <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okP">Сохранить</button></div>`,
-    (bg) => { $('#okP', bg).onclick = async () => {
+    (bg) => {
+      $('#pGeo', bg).onclick = () => {
+        if (!navigator.geolocation) return toast('Геолокация не поддерживается браузером', 'warn');
+        $('#pGeo', bg).disabled = true;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            lat = pos.coords.latitude; lng = pos.coords.longitude;
+            $('#pGeoVal', bg).textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            $('#pGeo', bg).disabled = false;
+            toast('Геолокация получена', 'ok');
+          },
+          () => { $('#pGeo', bg).disabled = false; toast('Не удалось получить геолокацию', 'warn'); },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      };
+      $('#okP', bg).onclick = async () => {
       const body = { name: $('#pn', bg).value, address: $('#pa', bg).value, bre_id: $('#pb', bg).value || null,
         spv_name: $('#pspn', bg).value || null, spv_phone: $('#pspp', bg).value || null,
+        phone: $('#pph', bg).value || null, channel: $('#pch', bg).value || null, lat, lng,
         max_se: Number($('#pm', bg).value), sale_mode: $('#ps', bg).value, status: $('#pst', bg).value, shift_end_time: $('#pe', bg).value || null };
       try { await api(p ? `/points/${p.id}` : '/points', { method: p ? 'PUT' : 'POST', body }); closeModal(); toast('Сохранено', 'ok'); renderRoute(); } catch {}
-    }; });
+      };
+    });
 }
 
 // ============================================================

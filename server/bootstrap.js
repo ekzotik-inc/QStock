@@ -177,12 +177,13 @@ function doneInventory(pid, shiftId, user, ago) {
   return invId;
 }
 
-function point(name, address, bre, maxSe, mode, spv) {
+function point(name, address, bre, maxSe, mode, spv, extra = {}) {
   const existing = db.prepare('SELECT id FROM points WHERE name=?').get(name);
   if (existing) return existing.id;
-  return db.prepare(`INSERT INTO points (name, address, bre_id, max_se, sale_mode, shift_end_time, spv_name, spv_phone)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(name, address, bre.id, maxSe, mode, '22:00',
-    spv ? spv[0] : null, spv ? spv[1] : null).lastInsertRowid;
+  return db.prepare(`INSERT INTO points (name, address, bre_id, max_se, sale_mode, shift_end_time, spv_name, spv_phone, phone, channel, lat, lng)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(name, address, bre.id, maxSe, mode, '22:00',
+    spv ? spv[0] : null, spv ? spv[1] : null, extra.phone || null, extra.channel || null,
+    extra.lat != null ? extra.lat : null, extra.lng != null ? extra.lng : null).lastInsertRowid;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,11 +212,16 @@ function seedDemo(admin, bre) {
     const spv1 = ['Рустамов Улугбек Спв.', '+998 90 123 45 67'];
     const spv2 = ['Каримова Дилноза Спв.', '+998 90 765 43 21'];
     const central = existingCentral ? existingCentral.id
-      : point('ТТ Центральная', 'г. Ташкент, пр. Амира Темура, 1', bre, 2, 'per_sale', spv1);
-    const compass = point('Compass', 'г. Ташкент, ТРЦ Compass, 2 этаж', bre, 2, 'per_sale', spv1);
-    const riverside = point('ТРЦ Riverside', 'г. Ташкент, наб. Анхор, ТРЦ Riverside', bre2, 2, 'per_sale', spv2);
-    const chorsu = point('Chorsu Bazaar', 'г. Ташкент, Чорсу, торговый купол', bre, 2, 'summary', spv1);
-    const mega = point('Mega Planet', 'г. Ташкент, ул. Мустакиллик, ТРЦ Mega Planet', bre2, 2, 'per_sale', spv2);
+      : point('ТТ Центральная', 'г. Ташкент, пр. Амира Темура, 1', bre, 2, 'per_sale', spv1,
+          { phone: '+998 71 200 10 10', channel: 'IQOS', lat: 41.311081, lng: 69.279737 });
+    const compass = point('Compass', 'г. Ташкент, ТРЦ Compass, 2 этаж', bre, 2, 'per_sale', spv1,
+          { phone: '+998 71 200 20 20', channel: 'BR', lat: 41.326039, lng: 69.228005 });
+    const riverside = point('ТРЦ Riverside', 'г. Ташкент, наб. Анхор, ТРЦ Riverside', bre2, 2, 'per_sale', spv2,
+          { phone: '+998 71 200 30 30', channel: 'BR Mini', lat: 41.334, lng: 69.291 });
+    const chorsu = point('Chorsu Bazaar', 'г. Ташкент, Чорсу, торговый купол', bre, 2, 'summary', spv1,
+          { phone: '+998 71 200 40 40', channel: 'Street Retail', lat: 41.326944, lng: 69.236944 });
+    const mega = point('Mega Planet', 'г. Ташкент, ул. Мустакиллик, ТРЦ Mega Planet', bre2, 2, 'per_sale', spv2,
+          { phone: '+998 71 200 50 50', channel: 'BR', lat: 41.2995, lng: 69.2401 });
 
     // ---- shift history ----------------------------------------------------
     const hCentral = genHistory(central, [[petrov, sidorov]], { days: 12, lastState: 'open' });

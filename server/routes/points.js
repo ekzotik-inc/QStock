@@ -82,14 +82,19 @@ router.get('/:id', authRequired, (req, res) => {
   res.json(s);
 });
 
+const CHANNELS = ['IQOS', 'BR', 'BR Mini', 'Street Retail'];
+
 router.post('/', requireRole('ADMIN'), (req, res) => {
-  const { name, address, bre_id, status, max_se, sale_mode, shift_end_time, spv_name, spv_phone } = req.body || {};
+  const { name, address, bre_id, status, max_se, sale_mode, shift_end_time,
+    spv_name, spv_phone, phone, channel, lat, lng } = req.body || {};
   if (!name) return res.status(400).json({ error: 'Название обязательно' });
+  if (channel && !CHANNELS.includes(channel)) return res.status(400).json({ error: 'Неверный канал' });
   const info = db.prepare(
-    `INSERT INTO points (name, address, bre_id, status, max_se, sale_mode, shift_end_time, spv_name, spv_phone)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO points (name, address, bre_id, status, max_se, sale_mode, shift_end_time, spv_name, spv_phone, phone, channel, lat, lng)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(name, address || null, bre_id || null, status || 'active',
-    Number(max_se) || 2, sale_mode || 'per_sale', shift_end_time || null, spv_name || null, spv_phone || null);
+    Number(max_se) || 2, sale_mode || 'per_sale', shift_end_time || null, spv_name || null, spv_phone || null,
+    phone || null, channel || null, lat != null && lat !== '' ? Number(lat) : null, lng != null && lng !== '' ? Number(lng) : null);
   const p = db.prepare('SELECT * FROM points WHERE id = ?').get(info.lastInsertRowid);
   audit({ userId: req.user.id, action: 'point_create', entity: 'point', newValue: p, ip: req.ip });
   rt.emitAll('point:changed', { pointId: p.id });
@@ -100,15 +105,22 @@ router.put('/:id', requireRole('ADMIN'), (req, res) => {
   const id = Number(req.params.id);
   const old = db.prepare('SELECT * FROM points WHERE id = ?').get(id);
   if (!old) return res.status(404).json({ error: 'Не найдено' });
-  const { name, address, bre_id, status, max_se, sale_mode, shift_end_time, spv_name, spv_phone } = req.body || {};
+  const { name, address, bre_id, status, max_se, sale_mode, shift_end_time,
+    spv_name, spv_phone, phone, channel, lat, lng } = req.body || {};
+  if (channel && !CHANNELS.includes(channel)) return res.status(400).json({ error: 'Неверный канал' });
   db.prepare(
-    `UPDATE points SET name=?, address=?, bre_id=?, status=?, max_se=?, sale_mode=?, shift_end_time=?, spv_name=?, spv_phone=? WHERE id=?`
+    `UPDATE points SET name=?, address=?, bre_id=?, status=?, max_se=?, sale_mode=?, shift_end_time=?,
+       spv_name=?, spv_phone=?, phone=?, channel=?, lat=?, lng=? WHERE id=?`
   ).run(
     name || old.name, address !== undefined ? address : old.address,
     bre_id !== undefined ? bre_id : old.bre_id, status || old.status,
     max_se != null ? Number(max_se) : old.max_se, sale_mode || old.sale_mode,
     shift_end_time !== undefined ? shift_end_time : old.shift_end_time,
-    spv_name !== undefined ? spv_name : old.spv_name, spv_phone !== undefined ? spv_phone : old.spv_phone, id
+    spv_name !== undefined ? spv_name : old.spv_name, spv_phone !== undefined ? spv_phone : old.spv_phone,
+    phone !== undefined ? phone : old.phone, channel !== undefined ? channel : old.channel,
+    lat !== undefined ? (lat != null && lat !== '' ? Number(lat) : null) : old.lat,
+    lng !== undefined ? (lng != null && lng !== '' ? Number(lng) : null) : old.lng,
+    id
   );
   audit({ userId: req.user.id, action: 'point_update', entity: 'point', oldValue: old,
     newValue: req.body, ip: req.ip });

@@ -248,5 +248,9 @@ addColumn('shifts', 'closed_by_other', 'INTEGER NOT NULL DEFAULT 0'); // 1 = clo
 // SPV (supervisor over several BRE) is not yet a login role — stored as free text on the point.
 addColumn('points', 'spv_name', 'TEXT');
 addColumn('points', 'spv_phone', 'TEXT');
+addColumn('points', 'phone', 'TEXT');                 // point's own contact phone
+addColumn('points', 'channel', 'TEXT');                // IQOS/BR/BR Mini/Street Retail
+addColumn('points', 'lat', 'REAL');                    // geolocation, shared once by admin
+addColumn('points', 'lng', 'REAL');
 
 module.exports = db;
