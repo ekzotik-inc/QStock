@@ -6,6 +6,47 @@ const { audit } = require('../util');
 
 const router = express.Router();
 
+// Own profile — every authenticated user. Supervisor/BRE/point are derived
+// (not stored on the user) from the point the user is currently connected to,
+// falling back to their most recent shift's point.
+router.get('/me/profile', (req, res) => {
+  const u = req.user;
+  let point = null;
+  if (u.role === 'SE') {
+    let p = db.prepare(
+      `SELECT p.id, p.name, p.bre_id, b.full_name AS bre_name, b.phone AS bre_phone
+       FROM point_se ps JOIN points p ON p.id = ps.point_id
+       LEFT JOIN users b ON b.id = p.bre_id
+       WHERE ps.se_id = ? LIMIT 1`
+    ).get(u.id);
+    if (!p) {
+      p = db.prepare(
+        `SELECT p.id, p.name, p.bre_id, b.full_name AS bre_name, b.phone AS bre_phone
+         FROM shifts sh JOIN points p ON p.id = sh.point_id
+         LEFT JOIN users b ON b.id = p.bre_id
+         WHERE sh.opened_by = ? ORDER BY sh.opened_at DESC LIMIT 1`
+      ).get(u.id);
+    }
+    point = p || null;
+  }
+  res.json({ ...publicUser(u), point_name: point ? point.name : null,
+    supervisor_name: point ? point.bre_name : null, supervisor_phone: point ? point.bre_phone : null });
+});
+
+// Self-service: phone, avatar color, own password. Name/role/status stay admin-only.
+router.put('/me/profile', (req, res) => {
+  const { phone, avatar_color, password } = req.body || {};
+  const u = req.user;
+  db.prepare('UPDATE users SET phone = ?, avatar_color = ?, password_hash = ? WHERE id = ?').run(
+    phone != null ? String(phone).trim() || null : u.phone,
+    avatar_color != null ? String(avatar_color) || null : u.avatar_color,
+    password ? hashPassword(password) : u.password_hash,
+    u.id
+  );
+  audit({ userId: u.id, action: 'profile_update', entity: 'user', newValue: { phone, avatar_color, password_changed: !!password }, ip: req.ip });
+  res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(u.id)));
+});
+
 // List users (admin) or BRE list (for assignment) — admin only for full list
 router.get('/', requireRole('ADMIN'), (req, res) => {
   const rows = db.prepare('SELECT * FROM users ORDER BY role, full_name').all();

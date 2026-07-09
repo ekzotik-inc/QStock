@@ -136,7 +136,8 @@ a { color: var(--accent-ink); }
 .nav a:active { transform: scale(.98); }
 .nav a.active { background: rgba(0, 209, 210, .14); color: #5fe6e6; }
 .nav a.active svg { opacity: 1; }
-.sidebar .me { margin-top: auto; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, .08); display: flex; align-items: center; gap: 11px; }
+.sidebar .me { margin-top: auto; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, .08); display: flex; align-items: center; gap: 11px; cursor: pointer; border-radius: 10px; }
+.sidebar .me:hover { background: rgba(255, 255, 255, .05); }
 .me .avatar { width: 38px; height: 38px; border-radius: 50%; background: rgba(0, 209, 210, .16); color: #5fe6e6;
   display: grid; place-items: center; font-weight: 800; font-size: 14px; flex: none; }
 .me .who { font-size: 14px; font-weight: 700; line-height: 1.2; color: #eef4f4; }

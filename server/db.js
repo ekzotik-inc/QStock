@@ -242,5 +242,8 @@ function addColumn(table, col, def) {
 addColumn('skus', 'safety_pct', 'REAL');   // per-SKU safety stock %, null = use default
 addColumn('skus', 'lead_days', 'REAL');    // per-SKU supplier lead time, null = use default
 addColumn('shift_stock', 'adjust', 'REAL NOT NULL DEFAULT 0'); // approved writeoff/return net effect
+addColumn('users', 'phone', 'TEXT');
+addColumn('users', 'avatar_color', 'TEXT');    // hex color for the initials avatar; null = auto from name
+addColumn('shifts', 'closed_by_other', 'INTEGER NOT NULL DEFAULT 0'); // 1 = closed_by != opened_by (flagged for review)
 
 module.exports = db;

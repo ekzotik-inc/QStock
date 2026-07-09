@@ -322,13 +322,18 @@ router.post('/:id/close', authRequired, (req, res) => {
   if (req.user.role === 'SE' && !seConnected(req.user.id, shift.point_id)) {
     return res.status(403).json({ error: 'Нет доступа к точке' });
   }
+  // Any SE connected to the point may close (shared shift/cabinet) — but if
+  // it's not the one who opened it, that's logged as a review flag, not blocked.
   if (shift.needs_inventory) {
     return res.status(409).json({ error: 'Требуется инвентаризация. Закрытие смены невозможно.' });
   }
-  db.prepare(`UPDATE shifts SET status='closed', closed_by=?, closed_at=datetime('now') WHERE id=?`)
-    .run(req.user.id, shiftId);
+  const mismatch = shift.opened_by && shift.opened_by !== req.user.id ? 1 : 0;
+  db.prepare(`UPDATE shifts SET status='closed', closed_by=?, closed_at=datetime('now'), closed_by_other=? WHERE id=?`)
+    .run(req.user.id, mismatch, shiftId);
   disconnectAllSE(shift.point_id);   // shift closed -> reset connected SE to 0
   audit({ userId: req.user.id, action: 'shift_close', entity: 'shift', newValue: { shift_id: shiftId }, ip: req.ip });
+  if (mismatch) audit({ userId: req.user.id, action: 'shift_close_anomaly', entity: 'shift',
+    newValue: { shift_id: shiftId, opened_by: shift.opened_by, closed_by: req.user.id }, ip: req.ip });
   rt.emitPoint(shift.point_id, 'shift:changed', { pointId: shift.point_id, shiftId, status: 'closed' });
   res.json(shiftDetail(shiftId));
 });
@@ -338,8 +343,9 @@ router.post('/:id/force-close', requireRole('ADMIN'), (req, res) => {
   const shiftId = Number(req.params.id);
   const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shiftId);
   if (!shift) return res.status(404).json({ error: 'Не найдено' });
-  db.prepare(`UPDATE shifts SET status='closed', needs_inventory=0, closed_by=?, closed_at=datetime('now') WHERE id=?`)
-    .run(req.user.id, shiftId);
+  const mismatch = shift.opened_by && shift.opened_by !== req.user.id ? 1 : 0;
+  db.prepare(`UPDATE shifts SET status='closed', needs_inventory=0, closed_by=?, closed_at=datetime('now'), closed_by_other=? WHERE id=?`)
+    .run(req.user.id, mismatch, shiftId);
   disconnectAllSE(shift.point_id);   // shift closed -> reset connected SE to 0
   audit({ userId: req.user.id, action: 'shift_force_close', entity: 'shift', newValue: { shift_id: shiftId }, ip: req.ip });
   rt.emitPoint(shift.point_id, 'shift:changed', { pointId: shift.point_id, shiftId, status: 'closed' });

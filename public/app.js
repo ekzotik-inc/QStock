@@ -239,7 +239,7 @@ function navGroups() {
 function navItems() { return navGroups().flatMap((g) => g.items); }
 
 // Detail routes that are reachable without a sidebar nav entry.
-const DETAIL_ROUTES = ['shift', 'pointmon'];
+const DETAIL_ROUTES = ['shift', 'pointmon', 'profile'];
 
 function renderShell() {
   loadNotifications();
@@ -260,8 +260,8 @@ function renderShell() {
         <div class="brand"><span class="logo">Q</span><span>Stock</span></div>
         <nav class="nav">${groups.map((g) =>
           `<div class="nav-group"><div class="nav-group-title">${g.h}</div>${g.items.map(link).join('')}</div>`).join('')}</nav>
-        <div class="me">
-          <div class="avatar">${esc(initials(App.user.full_name))}</div>
+        <div class="me click" id="meBtn" title="Мой профиль">
+          <div class="avatar" style="${App.user.avatar_color ? `background:${esc(App.user.avatar_color)}` : ''}">${esc(initials(App.user.full_name))}</div>
           <div style="flex:1;min-width:0">
             <div class="who">${emp(App.user.full_name)}</div>
             <div class="role">${roleLabel(App.user.role)}</div>
@@ -279,6 +279,7 @@ function renderShell() {
   const drawerBtn = shell.querySelector('#drawerBtn');
   if (drawerBtn) drawerBtn.onclick = () => shell.classList.add('drawer-open');
   shell.querySelector('.drawer-bg').onclick = () => shell.classList.remove('drawer-open');
+  $('#meBtn').onclick = () => { App.route = 'profile'; renderShell(); };
   $('#logoutBtn').onclick = async () => {
     try { await api('/auth/logout', { method: 'POST' }); } catch {}
     App.user = null; App.state = {}; App.notifications = [];
@@ -406,6 +407,7 @@ function renderRoute() {
     approvals: viewApprovals, pointmon: viewPointMonitor, procurement: viewProcurement,
     // tasks + inventory history
     setasks: viewTasks, tasksmgr: viewTasks, seinv: viewInvHistory, invhistory: viewInvHistory,
+    profile: viewProfile,
   };
   const fallback = App.user.role === 'SE' ? viewMyShift : viewDashboard;
   const fn = routes[App.route] || fallback;
@@ -883,6 +885,55 @@ async function openManualShift(point) {
         closeModal(); App.state.shiftId = d.shift.id; renderShell();
       };
     });
+}
+
+// ---- Мой профиль ----
+const AVATAR_COLORS = ['#00d1d2', '#5b8def', '#e8a413', '#ef5b5b', '#8a63d2', '#2fb380'];
+async function viewProfile(v) {
+  v.innerHTML = topbar('Мой профиль');
+  bindBell();
+  const p = await api('/users/me/profile');
+  const body = el(`<div class="fade-in" style="max-width:560px">
+    <div class="card">
+      <div class="row" style="gap:16px;align-items:center">
+        <div class="avatar" id="pfAvatar" style="width:56px;height:56px;font-size:20px;cursor:pointer;${p.avatar_color ? `background:${esc(p.avatar_color)}` : ''}">${esc(initials(p.full_name))}</div>
+        <div>
+          <div style="font-size:18px;font-weight:800">${esc(p.full_name)}</div>
+          <div class="muted">${roleLabel(p.role)} · ${esc(p.login)}</div>
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px;margin:10px 0 4px">Цвет аватара</div>
+      <div class="row wrap" id="pfColors" style="gap:8px">
+        ${AVATAR_COLORS.map((c) => `<div data-color="${c}" style="width:26px;height:26px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${p.avatar_color === c ? 'var(--ink)' : 'transparent'}"></div>`).join('')}
+      </div>
+      ${p.role === 'SE' ? `<div class="stat-line" style="margin-top:16px"><span>Точка</span><b>${esc(p.point_name || '—')}</b></div>
+        <div class="stat-line"><span>Супервайзер (BRE)</span><b>${esc(p.supervisor_name || '—')}</b></div>
+        <div class="stat-line"><span>Телефон BRE</span><b>${esc(p.supervisor_phone || '—')}</b></div>` : ''}
+      <div class="muted" style="font-size:12px;margin:16px 0 4px">Мой телефон</div>
+      <input class="qty-input" id="pfPhone" style="width:100%" placeholder="+998 __ ___ __ __" value="${esc(p.phone || '')}">
+      <div class="muted" style="font-size:12px;margin:16px 0 4px">Новый пароль (необязательно)</div>
+      <input class="qty-input" id="pfPass" type="password" style="width:100%" placeholder="Оставьте пустым, чтобы не менять">
+      <div class="row" style="margin-top:18px"><button class="btn ok" id="pfSave">Сохранить</button></div>
+    </div>
+  </div>`);
+  v.appendChild(body);
+  let color = p.avatar_color || null;
+  body.querySelectorAll('[data-color]').forEach((c) => c.onclick = () => {
+    color = c.dataset.color;
+    body.querySelectorAll('[data-color]').forEach((x) => x.style.border = '2px solid transparent');
+    c.style.border = '2px solid var(--ink)';
+    $('#pfAvatar', body).style.background = color;
+  });
+  $('#pfSave', body).onclick = async () => {
+    try {
+      const updated = await api('/users/me/profile', { method: 'PUT', body: {
+        phone: $('#pfPhone', body).value, avatar_color: color, password: $('#pfPass', body).value || undefined,
+      } });
+      Object.assign(App.user, updated);
+      toast('Профиль сохранён', 'ok');
+      renderShell();
+    } catch {}
+  };
 }
 
 // ---- Новое поступление ----
@@ -1925,7 +1976,7 @@ async function viewShifts(v) {
   const isAdmin = App.user.role === 'ADMIN';
   body.innerHTML = `<table><thead><tr><th>#</th><th>Точка</th><th>Дата</th><th>Статус</th><th>Открыта</th><th>Закрыта</th><th></th></tr></thead>
     <tbody>${rows.map((s) => `<tr><td>${s.id}</td><td>${esc(s.point_name)}</td><td>${s.business_date}</td>
-      <td>${statusPill(s.status)}${s.needs_inventory ? ' <span class="pill inv">инв.</span>' : ''}</td>
+      <td>${statusPill(s.status)}${s.needs_inventory ? ' <span class="pill inv">инв.</span>' : ''}${s.closed_by_other ? ' <span class="pill danger" title="Закрыл не тот, кто открывал">⚠ др. сотрудник</span>' : ''}</td>
       <td>${fmtDate(s.opened_at)}</td><td>${s.closed_at ? fmtDate(s.closed_at) : '—'}</td>
       <td class="num"><button class="btn ghost sm" data-view="${s.id}">Открыть</button>
       ${s.status === 'closed' ? `<button class="btn ghost sm" data-xls="${s.id}" title="Выгрузить в Excel">Excel</button>` : ''}
