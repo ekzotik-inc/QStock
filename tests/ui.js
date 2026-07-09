@@ -127,10 +127,9 @@ async function loginAs(page, login, password) {
         await page.click('.nav a[data-route="selogs"]'); await page.waitForTimeout(600);
         check('UI-SE-LOGS', await page.isVisible('table tbody tr'), 'logs visible');
 
-        // Запасы в точке (forecast)
-        await page.click('.nav a[data-route="sestock"]'); await page.waitForTimeout(700);
-        const fHeaders = (await page.$$eval('.se-shift thead th', (e) => e.map((x) => x.innerText))).join('|');
-        check('UI-SE-FORECAST', /ЗАКАЗАТЬ/.test(fHeaders) && /СРЕДН/.test(fHeaders), fHeaders);
+        // «Задачи» и «Запасы в точке» убраны из навигации SE
+        const seNav2 = (await page.$$eval('.nav a', (e) => e.map((x) => x.dataset.route))).join('|');
+        check('UI-SE-NAV-TRIMMED', !seNav2.includes('sestock') && !seNav2.includes('setasks'), 'no sestock/setasks in SE nav');
         // no red low-stock rows anywhere for SE
         check('UI-SE-NO-RED', (await page.$$('.row-low')).length === 0, 'no red low-stock rows for SE');
 

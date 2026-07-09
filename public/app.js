@@ -200,9 +200,7 @@ function navGroups() {
       ['seinv', 'Инвентаризация', 'clipboard-check'],
     ]},
     { h: 'Точка', items: [
-      ['setasks', 'Задачи', 'clipboard-list'],
       ['notes', 'Заметки', 'sticky-note'],
-      ['sestock', 'Запасы в точке', 'layers'],
     ]},
     { h: 'История', items: [
       ['shifthistory', 'История смен', 'history'],
@@ -381,17 +379,70 @@ function bellHtml() {
   const unread = App.notifications.filter((n) => !n.is_read).length;
   return `<div class="bell" id="bell">${ICON.bell}${unread ? `<span class="badge">${unread}</span>` : ''}</div>`;
 }
-function renderBell() { const b = $('#bell'); if (b) b.outerHTML = bellHtml(); bindBell(); }
+function renderBell() {
+  const b = $('#bell'); if (!b) return;
+  if (b.querySelector('.notif-list')) { // panel open — update only the badge, don't nuke the dropdown
+    const unread = App.notifications.filter((n) => !n.is_read).length;
+    const badge = b.querySelector(':scope > .badge');
+    if (badge && !unread) badge.remove();
+    else if (badge) badge.textContent = unread;
+    else if (unread) b.insertAdjacentHTML('beforeend', `<span class="badge">${unread}</span>`);
+    return;
+  }
+  b.outerHTML = bellHtml(); bindBell();
+}
+// notification type -> [lucide icon, color tone] for the dropdown
+const NOTIF_ICON = {
+  low_stock: ['alert-triangle', 'danger'],
+  shift_overdue: ['clock', 'warn'],
+  inventory_assigned: ['clipboard-check', 'warn'],
+  inventory_overdue: ['clipboard-check', 'danger'],
+  inventory_done: ['clipboard-check', 'ok'],
+  request_new: ['inbox', 'teal'],
+  request_decided: ['check-circle', 'ok'],
+  task_new: ['clipboard-list', 'teal'],
+  task_status: ['clipboard-list', 'slate'],
+  task_comment: ['message-square', 'slate'],
+};
 function bindBell() {
   const b = $('#bell'); if (!b) return;
-  b.onclick = () => {
+  b.onclick = (e) => {
+    if (e.target.closest('.notif-list')) return; // clicks inside the panel
     let list = $('.notif-list'); if (list) { list.remove(); return; }
-    const items = App.notifications.length
-      ? App.notifications.map((n) => `<div class="notif-item ${n.is_read ? '' : 'unread'}">${esc(notifText(n.type, n.payload))}<div class="muted" style="margin-top:4px">${fmtDate(n.created_at)}</div></div>`).join('')
-      : '<div class="empty">Нет уведомлений</div>';
-    list = el(`<div class="notif-list">${items}</div>`);
+    const unread = App.notifications.filter((n) => !n.is_read);
+    const read = App.notifications.filter((n) => n.is_read);
+    const item = (n) => {
+      const [ic, tone] = NOTIF_ICON[n.type] || ['bell', 'slate'];
+      return `<div class="notif-item ${n.is_read ? '' : 'unread'}">
+        <span class="act-ic tone-${tone}"><i data-lucide="${ic}"></i></span>
+        <div class="notif-body">
+          <div class="notif-text">${esc(notifText(n.type, n.payload))}</div>
+          <div class="notif-time">${relTime(n.created_at)}</div>
+        </div>
+        ${n.is_read ? '' : '<span class="notif-dot"></span>'}</div>`;
+    };
+    const html = `
+      <div class="notif-head">
+        <b>Уведомления</b>${unread.length ? `<span class="notif-count">${unread.length}</span>` : ''}
+        ${unread.length ? '<button class="notif-readall" id="readAll">Прочитать все</button>' : ''}
+      </div>
+      ${App.notifications.length
+        ? `${unread.length ? `<div class="notif-sec">Новые</div>${unread.map(item).join('')}` : ''}
+           ${read.length ? `<div class="notif-sec">Ранее</div>${read.slice(0, 20).map(item).join('')}` : ''}`
+        : '<div class="empty" style="padding:34px 20px"><i data-lucide="bell-off"></i><div style="margin-top:8px">Нет уведомлений</div></div>'}`;
+    list = el(`<div class="notif-list">${html}</div>`);
     b.appendChild(list);
-    api('/notifications/read', { method: 'POST', body: {} }).then(() => { App.notifications.forEach((n) => n.is_read = 1); });
+    if (window.lucide) lucide.createIcons();
+    const ra = list.querySelector('#readAll');
+    if (ra) ra.onclick = async (ev) => {
+      ev.stopPropagation();
+      try { await api('/notifications/read', { method: 'POST', body: {} }); } catch {}
+      App.notifications.forEach((n) => n.is_read = 1);
+      list.remove(); renderBell();
+    };
+    // close on outside click
+    const away = (ev) => { if (!ev.target.closest('.notif-list') && !ev.target.closest('#bell')) { list.remove(); document.removeEventListener('click', away); } };
+    setTimeout(() => document.addEventListener('click', away), 0);
   };
 }
 function notifText(type, p = {}) {
@@ -853,10 +904,8 @@ async function viewMyShift(v) {
       : d.lines.filter((l) => !tabCats.includes(l.category || ''));
     const countOf = (name) => d.lines.filter((l) => (l.category || '') === name).length;
     v.innerHTML = topbar('Моя смена', `
-      <button class="btn back sm" id="swPoint">Сменить точку</button>
       <button class="btn secondary sm" id="expBtn">Экспорт отчёта</button>
-      <button class="btn ${needInv ? 'ok' : 'secondary'} sm" id="invBtn">${needInv ? '❗ Провести инвентаризацию' : 'Инвентаризация'}</button>
-      <button class="btn dark sm" id="closeBtn">Закрыть смену</button>`,
+      <button class="btn dark sm" id="closeBtn" ${needInv ? 'disabled title="Сначала проведите инвентаризацию"' : ''}>Закрыть смену</button>`,
       `Точка «${d.shift.point_name}» · ${ruToday()}`);
     const wrap = el('<div class="fade-in"></div>'); v.appendChild(wrap);
     wrap.innerHTML = `
@@ -870,6 +919,9 @@ async function viewMyShift(v) {
           <div><span class="muted">Сумма продаж</span><b id="stValue">${money(t.sales_value)}</b></div>
           <div><span class="muted">Остаток вечером</span><b id="stCurrent" class="kpi-link" data-stock-point="${mine.id}" data-stock-name="${esc(mine.name)}">${num(t.current)}</b></div>
         </div>
+        <button class="inv-btn ${needInv ? 'armed' : ''}" id="invBtn" ${needInv ? '' : 'disabled'}
+          title="${needInv ? 'Инвентаризация назначена — проведите её' : 'Кнопка станет активной, когда BRE или администратор назначит инвентаризацию'}">
+          <i data-lucide="clipboard-check"></i>Инвентаризация</button>
       </div>
       ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
       <div class="row between wrap" style="margin:18px 0 0;gap:10px">
@@ -892,11 +944,11 @@ async function viewMyShift(v) {
     tbl.dataset.offVal = hidden.reduce((a, l) => a + l.sales_value, 0);
     tbl.dataset.offEve = hidden.reduce((a, l) => a + l.current, 0);
     wrap.querySelectorAll('[data-setab]').forEach((b) => b.onclick = () => { App.state.seTab = b.dataset.setab || ''; load(); });
-    const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
-    const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
+    const closeBtn = $('#closeBtn', v); if (closeBtn && !needInv) closeBtn.onclick = () => confirmClose(d);
+    const invBtn = $('#invBtn', wrap); if (invBtn && needInv) invBtn.onclick = () => doInventory(d);
     const expBtn = $('#expBtn', v); if (expBtn) expBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.xlsx`, '_blank');
-    const swBtn = $('#swPoint', v); if (swBtn) swBtn.onclick = () => switchPointModal(mine);
     const stC = $('#stCurrent', wrap); if (stC) stC.onclick = () => openStockModal(mine.id, mine.name);
+    if (window.lucide) lucide.createIcons();
     bindSeTable(wrap, d.shift.id);
     bindTableTools(wrap, d.shift.point_id);
   };
@@ -1034,12 +1086,13 @@ async function viewProfile(v) {
         <div class="stat-line"><span>Телефон СПВ</span><b>${esc(p.spv_phone || '—')}</b></div>` : ''}
       <div class="muted" style="font-size:12px;margin:16px 0 4px">Мой телефон</div>
       <input class="qty-input" id="pfPhone" style="width:100%" placeholder="+998 __ ___ __ __" value="${esc(p.phone || '')}">
-      <div class="muted" style="font-size:12px;margin:16px 0 4px">Новый пароль (необязательно)</div>
-      <input class="qty-input" id="pfPass" type="password" style="width:100%" placeholder="Оставьте пустым, чтобы не менять">
+      <div class="muted" style="font-size:12px;margin:14px 0 0;display:flex;align-items:center;gap:7px">
+        <i data-lucide="lock"></i> Смена пароля — только через администратора</div>
       <div class="row" style="margin-top:18px"><button class="btn ok" id="pfSave">Сохранить</button></div>
     </div>
   </div>`);
   v.appendChild(body);
+  if (window.lucide) lucide.createIcons();
   let color = p.avatar_color || null;
   body.querySelectorAll('[data-color]').forEach((c) => c.onclick = () => {
     color = c.dataset.color;
@@ -1050,7 +1103,7 @@ async function viewProfile(v) {
   $('#pfSave', body).onclick = async () => {
     try {
       const updated = await api('/users/me/profile', { method: 'PUT', body: {
-        phone: $('#pfPhone', body).value, avatar_color: color, password: $('#pfPass', body).value || undefined,
+        phone: $('#pfPhone', body).value, avatar_color: color,
       } });
       Object.assign(App.user, updated);
       toast('Профиль сохранён', 'ok');
@@ -2393,16 +2446,44 @@ async function priceHistory(id) {
 // USERS (ADMIN)
 // ============================================================
 async function viewUsers(v) {
-  v.innerHTML = topbar('Пользователи', `<button class="btn sm" id="add">+ Пользователь</button>`);
+  v.innerHTML = topbar('Пользователи', `<button class="btn sm" id="add">+ Пользователь</button>`,
+    'Профили всех сотрудников · логины, пароли и роли назначает администратор');
   bindBell();
-  const body = el('<div class="card" style="padding:0;overflow:auto"></div>'); v.appendChild(body);
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
   $('#add').onclick = () => userForm();
+  const rolePill = (r) => ({
+    ADMIN: '<span class="pill closed" style="background:var(--ink);color:var(--surface)">Администратор</span>',
+    BRE: '<span class="pill inv">BRE</span>',
+    SE: '<span class="pill open">Sales Expert</span>',
+  }[r] || esc(r));
   const load = async () => {
     const rows = await api('/users');
-    body.innerHTML = `<table><thead><tr><th>ФИО</th><th>Логин</th><th>Роль</th><th>Статус</th><th></th></tr></thead>
-      <tbody>${rows.map((u) => `<tr><td>${emp(u.full_name)}</td><td>${esc(u.login)}</td><td>${roleLabel(u.role)}</td>
-        <td>${u.status === 'active' ? '<span class="pill open">активен</span>' : '<span class="pill danger">заблокирован</span>'}</td>
-        <td class="num"><button class="btn ghost sm" data-edit="${u.id}">Изменить</button></td></tr>`).join('')}</tbody></table>`;
+    const groups = [['ADMIN', 'Администраторы'], ['BRE', 'BRE — региональные менеджеры'], ['SE', 'Sales Experts']];
+    body.innerHTML = groups.map(([role, title]) => {
+      const us = rows.filter((u) => u.role === role);
+      if (!us.length) return '';
+      return `<div class="section-title">${title} · ${us.length}</div>
+        <div class="profile-grid">${us.map((u) => `
+          <div class="card profile-card ${u.status === 'blocked' ? 'is-blocked' : ''}">
+            <div class="row" style="gap:13px">
+              <div class="avatar pf-avatar" style="${u.avatar_color ? `background:${esc(u.avatar_color)}` : ''}">${esc(initials(u.full_name))}</div>
+              <div style="flex:1;min-width:0">
+                <div class="pf-name">${esc(u.full_name)}</div>
+                <div class="muted" style="font-size:12.5px">@${esc(u.login)}</div>
+              </div>
+              ${rolePill(u.role)}
+            </div>
+            <div class="pf-rows">
+              <div class="stat-line"><span><i data-lucide="phone"></i> Телефон</span><b>${esc(u.phone || '—')}</b></div>
+              <div class="stat-line"><span><i data-lucide="shield"></i> Статус</span>
+                ${u.status === 'active' ? '<span class="pill open"><span class="dot"></span>активен</span>' : '<span class="pill danger">заблокирован</span>'}</div>
+            </div>
+            <div class="row" style="justify-content:flex-end">
+              <button class="btn secondary sm" data-edit="${u.id}"><i data-lucide="pencil"></i>Изменить</button>
+            </div>
+          </div>`).join('')}</div>`;
+    }).join('');
+    if (window.lucide) lucide.createIcons();
     body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => userForm(rows.find((u) => u.id === Number(b.dataset.edit))));
   };
   await load();
@@ -2413,11 +2494,12 @@ function userForm(u) {
     <div class="field"><label>ФИО</label><input id="uf" value="${esc(u?.full_name || '')}"></div>
     <div class="row"><div class="field" style="flex:1"><label>Логин</label><input id="ul" value="${esc(u?.login || '')}" ${u ? 'disabled' : ''}></div>
     <div class="field" style="flex:1"><label>Роль</label><select id="ur"><option value="SE" ${u?.role === 'SE' ? 'selected' : ''}>Sales Expert</option><option value="BRE" ${u?.role === 'BRE' ? 'selected' : ''}>BRE</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Администратор</option></select></div></div>
-    <div class="row"><div class="field" style="flex:1"><label>Пароль ${u ? '(оставьте пустым)' : ''}</label><input id="up" type="password"></div>
+    <div class="row"><div class="field" style="flex:1"><label>Пароль ${u ? '(оставьте пустым, чтобы не менять)' : ''}</label><input id="up" type="password" autocomplete="new-password"></div>
     <div class="field" style="flex:1"><label>Статус</label><select id="us"><option value="active" ${u?.status === 'active' ? 'selected' : ''}>Активен</option><option value="blocked" ${u?.status === 'blocked' ? 'selected' : ''}>Заблокирован</option></select></div></div>
+    <div class="field"><label>Телефон</label><input id="uph" value="${esc(u?.phone || '')}" placeholder="+998 __ ___ __ __"></div>
     <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okU">Сохранить</button></div>`,
     (bg) => { $('#okU', bg).onclick = async () => {
-      const body = { full_name: $('#uf', bg).value, role: $('#ur', bg).value, status: $('#us', bg).value };
+      const body = { full_name: $('#uf', bg).value, role: $('#ur', bg).value, status: $('#us', bg).value, phone: $('#uph', bg).value || null };
       const pw = $('#up', bg).value; if (pw) body.password = pw;
       if (!u) body.login = $('#ul', bg).value;
       try { await api(u ? `/users/${u.id}` : '/users', { method: u ? 'PUT' : 'POST', body }); closeModal(); toast('Сохранено', 'ok'); renderRoute(); } catch {}

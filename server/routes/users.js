@@ -34,17 +34,17 @@ router.get('/me/profile', (req, res) => {
     spv_name: point ? point.spv_name : null, spv_phone: point ? point.spv_phone : null });
 });
 
-// Self-service: phone, avatar color, own password. Name/role/status stay admin-only.
+// Self-service: phone and avatar color only. Passwords are changed exclusively
+// by the administrator (via PUT /users/:id); name/role/status stay admin-only too.
 router.put('/me/profile', (req, res) => {
-  const { phone, avatar_color, password } = req.body || {};
+  const { phone, avatar_color } = req.body || {};
   const u = req.user;
-  db.prepare('UPDATE users SET phone = ?, avatar_color = ?, password_hash = ? WHERE id = ?').run(
+  db.prepare('UPDATE users SET phone = ?, avatar_color = ? WHERE id = ?').run(
     phone != null ? String(phone).trim() || null : u.phone,
     avatar_color != null ? String(avatar_color) || null : u.avatar_color,
-    password ? hashPassword(password) : u.password_hash,
     u.id
   );
-  audit({ userId: u.id, action: 'profile_update', entity: 'user', newValue: { phone, avatar_color, password_changed: !!password }, ip: req.ip });
+  audit({ userId: u.id, action: 'profile_update', entity: 'user', newValue: { phone, avatar_color }, ip: req.ip });
   res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(u.id)));
 });
 
@@ -62,7 +62,7 @@ router.get('/by-role/:role', requireRole('ADMIN'), (req, res) => {
 });
 
 router.post('/', requireRole('ADMIN'), (req, res) => {
-  const { full_name, role, login, password, status } = req.body || {};
+  const { full_name, role, login, password, status, phone } = req.body || {};
   if (!full_name || !role || !login || !password) {
     return res.status(400).json({ error: 'ФИО, роль, логин и пароль обязательны' });
   }
@@ -71,8 +71,8 @@ router.post('/', requireRole('ADMIN'), (req, res) => {
     return res.status(409).json({ error: 'Логин уже существует' });
   }
   const info = db.prepare(
-    `INSERT INTO users (full_name, login, password_hash, role, status) VALUES (?, ?, ?, ?, ?)`
-  ).run(full_name, login, hashPassword(password), role, status || 'active');
+    `INSERT INTO users (full_name, login, password_hash, role, status, phone) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(full_name, login, hashPassword(password), role, status || 'active', phone || null);
   audit({ userId: req.user.id, action: 'user_create', entity: 'user', newValue: { login, role }, ip: req.ip });
   res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid)));
 });
@@ -81,15 +81,16 @@ router.put('/:id', requireRole('ADMIN'), (req, res) => {
   const id = Number(req.params.id);
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: 'Не найдено' });
-  const { full_name, role, status, password } = req.body || {};
+  const { full_name, role, status, password, phone } = req.body || {};
   db.prepare(
-    `UPDATE users SET full_name = ?, role = ?, status = ?, password_hash = ?
+    `UPDATE users SET full_name = ?, role = ?, status = ?, password_hash = ?, phone = ?
      WHERE id = ?`
   ).run(
     full_name || u.full_name,
     role || u.role,
     status || u.status,
     password ? hashPassword(password) : u.password_hash,
+    phone !== undefined ? phone : u.phone,
     id
   );
   audit({ userId: req.user.id, action: 'user_update', entity: 'user', oldValue: publicUser(u),
