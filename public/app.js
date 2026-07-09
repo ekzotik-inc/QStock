@@ -14,8 +14,26 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' сум';
+// «73,0 млн сум» — компактный формат для KPI-карточек (как в макете)
+const moneyShort = (n) => {
+  const v = Number(n) || 0;
+  if (Math.abs(v) >= 1e9) return (v / 1e9).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' млрд сум';
+  if (Math.abs(v) >= 1e6) return (v / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млн сум';
+  return money(v);
+};
 const num = (n) => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 const fmtDate = (s) => s ? new Date(s.replace(' ', 'T') + (s.includes('Z') ? '' : 'Z')).toLocaleString('ru-RU') : '—';
+// «26 минут назад» — для ленты событий на дашборде
+function relTime(s) {
+  if (!s) return '';
+  const t = new Date(s.replace(' ', 'T') + (s.includes('Z') ? '' : 'Z')).getTime();
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (m < 1) return 'только что';
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} ч назад`;
+  return fmtDate(s);
+}
 // highlight an employee name in IQOS turquoise everywhere
 const emp = (name) => `<span class="emp">${esc(name || '—')}</span>`;
 
@@ -39,8 +57,9 @@ function toast(msg, kind = '') {
 }
 
 function modal(html, onMount, cls = '') {
-  const bg = el(`<div class="modal-bg"><div class="modal ${cls}">${html}</div></div>`);
+  const bg = el(`<div class="modal-bg"><div class="modal ${cls}"><button class="modal-x" title="Закрыть">✕</button>${html}</div></div>`);
   bg.addEventListener('click', (e) => { if (e.target === bg) bg.remove(); });
+  bg.querySelector('.modal-x').onclick = () => bg.remove();
   // Enter in a single-line input submits the primary action (laptop-friendly)
   bg.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.shiftKey || e.defaultPrevented) return;
@@ -70,6 +89,7 @@ function wireEnterNav(scope, selector, onLast) {
 async function boot() {
   initTheme();
   document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#themeToggle')) toggleTheme(); });
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#logoutTop')) doLogout(); });
   try {
     const me = await api('/auth/me');
     App.user = me;
@@ -260,14 +280,17 @@ function renderShell() {
         <div class="brand"><span class="logo">Q</span><span>Stock</span></div>
         <nav class="nav">${groups.map((g) =>
           `<div class="nav-group"><div class="nav-group-title">${g.h}</div>${g.items.map(link).join('')}</div>`).join('')}</nav>
-        <div class="me click" id="meBtn" title="Мой профиль">
-          <div class="avatar" style="${App.user.avatar_color ? `background:${esc(App.user.avatar_color)}` : ''}">${esc(initials(App.user.full_name))}</div>
-          <div style="flex:1;min-width:0">
-            <div class="who">${emp(App.user.full_name)}</div>
-            <div class="role">${roleLabel(App.user.role)}</div>
+        ${App.user.role === 'SE' ? '<div class="sb-shift off" id="sbShift" style="display:none"></div>' : ''}
+        <div class="sb-foot">
+          <div class="me click" id="meBtn" title="Мой профиль">
+            <div class="avatar" style="${App.user.avatar_color ? `background:${esc(App.user.avatar_color)}` : ''}">${esc(initials(App.user.full_name))}</div>
+            <div style="flex:1;min-width:0">
+              <div class="who">${emp(App.user.full_name)}</div>
+              <div class="role">${roleLabel(App.user.role)}</div>
+            </div>
           </div>
+          ${App.user.role === 'SE' ? `<button class="sb-point-btn" id="sbPointBtn" title="Сменить точку">${ICON.home}</button>` : ''}
         </div>
-        <button class="logout-item" id="logoutBtn"><i data-lucide="log-out"></i><span>Выйти из системы</span></button>
       </aside>
       <main class="main"><div id="view"></div></main>
       <div class="bottom-nav">${bottom}</div>
@@ -280,12 +303,13 @@ function renderShell() {
   if (drawerBtn) drawerBtn.onclick = () => shell.classList.add('drawer-open');
   shell.querySelector('.drawer-bg').onclick = () => shell.classList.remove('drawer-open');
   $('#meBtn').onclick = () => { App.route = 'profile'; renderShell(); };
-  $('#logoutBtn').onclick = async () => {
-    try { await api('/auth/logout', { method: 'POST' }); } catch {}
-    App.user = null; App.state = {}; App.notifications = [];
-    if (App.socket) { App.socket.disconnect(); App.socket = null; }
-    App.route = 'dashboard';
-    renderLogin();
+  const sbBtn = $('#sbPointBtn');
+  if (sbBtn) sbBtn.onclick = async () => {
+    try {
+      const mine = await getMyPoint();
+      if (mine) switchPointModal(mine);
+      else { App.route = 'myshift'; renderShell(); }
+    } catch {}
   };
   if (window.lucide) lucide.createIcons();
   renderRoute();
@@ -306,10 +330,29 @@ const ICON = {
   grid: SVG('<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/>'),
   rows: SVG('<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/>'),
   send: SVG('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>'),
+  bell: SVG('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
+  logout: SVG('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
+  home: SVG('<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'),
 };
 
-function topbar(title, actionsHtml = '') {
-  return `<div class="topbar"><h2>${esc(title)}</h2><div class="actions">${actionsHtml}${themeBtnHtml()}${bellHtml()}</div></div>`;
+// «сегодня, 9 июля» — подзаголовок экрана по умолчанию (как в макете)
+function ruToday() {
+  const m = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const d = new Date();
+  return `сегодня, ${d.getDate()} ${m[d.getMonth()]}`;
+}
+function topbar(title, actionsHtml = '', sub = '') {
+  return `<div class="topbar"><div><h2>${esc(title)}</h2><div class="topbar-sub">${esc(sub || ruToday())}</div></div>
+    <div class="actions">${actionsHtml}${themeBtnHtml()}${bellHtml()}
+      <button class="logout-top" id="logoutTop" title="Выйти из системы">${ICON.logout}<span>Выйти</span></button>
+    </div></div>`;
+}
+async function doLogout() {
+  try { await api('/auth/logout', { method: 'POST' }); } catch {}
+  App.user = null; App.state = {}; App.notifications = [];
+  if (App.socket) { App.socket.disconnect(); App.socket = null; }
+  App.route = 'dashboard';
+  renderLogin();
 }
 
 // ---------- theme ----------
@@ -336,7 +379,7 @@ async function loadNotifications() {
 }
 function bellHtml() {
   const unread = App.notifications.filter((n) => !n.is_read).length;
-  return `<div class="bell" id="bell">🔔${unread ? `<span class="badge">${unread}</span>` : ''}</div>`;
+  return `<div class="bell" id="bell">${ICON.bell}${unread ? `<span class="badge">${unread}</span>` : ''}</div>`;
 }
 function renderBell() { const b = $('#bell'); if (b) b.outerHTML = bellHtml(); bindBell(); }
 function bindBell() {
@@ -404,21 +447,51 @@ function renderRoute() {
 // DASHBOARD (ADMIN / BRE)
 // ============================================================
 async function viewDashboard(v) {
-  v.innerHTML = topbar('Дашборд', `<button class="btn secondary sm" id="exp">Экспорт в Excel</button>`);
+  v.innerHTML = topbar('Дашборд', `<button class="btn secondary sm" id="exp">Экспорт в Excel</button>`,
+    `Обзор всех точек · ${ruToday()}`);
   const body = el('<div class="grid"></div>'); v.appendChild(body);
   $('#exp').onclick = () => window.open('/api/analytics/export.xlsx', '_blank');
   bindBell();
   const load = async () => {
     const per = App.state.dashPeriod || 'week';
-    const d = await api('/analytics/dashboard?chart_period=' + per);
+    const [d, moves] = await Promise.all([
+      api('/analytics/dashboard?chart_period=' + per),
+      api('/movements?limit=6').catch(() => []),
+    ]);
+    // «Топ точек» — прогресс-бары по рейтингу (как в макете)
+    const rank = d.charts.point_ranking;
+    const rankMax = Math.max(1, ...rank.map((x) => Number(x.value) || 0));
+    const topPoints = rank.slice(0, 5).map((x) => `<div>
+        <div class="row between" style="font-size:13px;margin-bottom:6px">
+          <span style="color:var(--ink-2);font-weight:600">${esc(x.name)}</span>
+          <span style="font-weight:800;font-variant-numeric:tabular-nums">${money(x.value)}</span></div>
+        <div class="track" style="height:8px"><div class="fill" style="width:${Math.max(4, Math.round((Number(x.value) || 0) / rankMax * 100))}%"></div></div>
+      </div>`).join('');
+    // «Последние события» — движения SKU с иконками
+    const actMeta = {
+      sale: ['shopping-bag', 'teal', (m) => `Продажа ×${num(Math.abs(m.qty))} — ${m.sku_name}`],
+      income: ['package', 'ok', (m) => `Приход +${num(m.qty)} — ${m.sku_name}`],
+      writeoff: ['trash-2', 'danger', (m) => `Списание ×${num(Math.abs(m.qty))} — ${m.sku_name}`],
+      inventory: ['clipboard-check', 'warn', (m) => `Инвентаризация — ${m.sku_name}`],
+      adjustment: ['sliders-horizontal', 'warn', (m) => `Корректировка — ${m.sku_name}`],
+      opening: ['sunrise', 'slate', (m) => `Утренний остаток — ${m.sku_name}`],
+      carryover: ['sunrise', 'slate', (m) => `Перенос остатка — ${m.sku_name}`],
+      admin_edit: ['pencil', 'slate', (m) => `Правка администратора — ${m.sku_name}`],
+    };
+    const activity = moves.map((m) => {
+      const [ic, tone, txt] = actMeta[m.type] || ['activity', 'slate', (x) => x.type];
+      return `<div class="act-row"><span class="act-ic tone-${tone}"><i data-lucide="${ic}"></i></span>
+        <div style="flex:1;min-width:0"><div class="act-text">${esc(txt(m))}</div>
+        <div class="act-time">${esc(m.point_name)} · ${relTime(m.created_at)}</div></div></div>`;
+    }).join('');
     body.innerHTML = `
       <div class="kpis">
         ${kpi('Открытых смен', d.widgets.open_shifts, { icon: 'clock', tone: 'teal' })}
         ${kpi('Закрытых смен', d.widgets.closed_shifts, { icon: 'check-circle', tone: 'ok' })}
         ${kpi('Активных SE', d.widgets.active_se, { icon: 'users', tone: 'slate' })}
         ${kpi('Продажи (шт)', num(d.widgets.sales_qty), { icon: 'shopping-bag', tone: 'teal', delta: d.deltas && d.deltas.sales_qty })}
-        ${kpi('Сумма продаж', money(d.widgets.sales_value), { accent: true, icon: 'wallet', tone: 'teal', delta: d.deltas && d.deltas.sales_value })}
-        ${kpi('Стоимость остатков', money(d.widgets.stock_value), { accent: true, icon: 'layers', tone: 'warn' })}
+        ${kpi('Сумма продаж', moneyShort(d.widgets.sales_value), { accent: true, icon: 'wallet', tone: 'teal', delta: d.deltas && d.deltas.sales_value })}
+        ${kpi('Стоимость остатков', moneyShort(d.widgets.stock_value), { accent: true, icon: 'layers', tone: 'warn' })}
       </div>
       ${d.low_stock.length ? `<div class="card point-crit">
         <div class="row between wrap"><h3 style="margin:0">⚠️ Критически низкий остаток <span class="crit-badge">везти срочно · ${d.low_stock.length}</span></h3>
@@ -429,25 +502,37 @@ async function viewDashboard(v) {
         <h3>⏰ Незакрытые смены</h3>
         ${d.unclosed_shifts.map((s) => `<div class="stat-line"><span>${esc(s.point_name)} (${s.business_date})</span><a data-shift="${s.shift_id}" class="link">открыть</a></div>`).join('')}
       </div>` : ''}
-      <div class="section-title">Торговые точки</div>
-      <div class="card" style="padding:0;overflow:auto">
-        <table><thead><tr><th>Точка</th><th>BRE</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
-        <tbody>${d.table.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.spv_name ? emp(r.spv_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td>
-          <td>${statusPill(r.shift_status)}</td><td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td>
-          <td class="num"><span class="kpi-link" data-stock-point="${r.point_id}" data-stock-name="${esc(r.name)}">${money(r.stock_value)}</span></td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
-      </div>
-      <div class="cards">
-        <div class="card"><div class="row between" style="align-items:center">
-          <h3 style="margin:0">Продажи по дням</h3>
+      <div class="dash-duo">
+        <div class="card"><div class="row between" style="align-items:center;margin-bottom:8px">
+          <h3 style="margin:0;font-size:16px">Продажи по дням</h3>
           <div class="segmented sm" id="dashPeriod">
             <button data-per="week" class="seg-opt ${per === 'week' ? 'on' : ''}">Неделя</button>
             <button data-per="month" class="seg-opt ${per === 'month' ? 'on' : ''}">Месяц</button>
             <button data-per="year" class="seg-opt ${per === 'year' ? 'on' : ''}">Год</button>
           </div></div>
           ${chartCanvas(d.charts.sales_by_day.map((x) => [x.d, x.v]), 'line')}</div>
+        <div class="card"><h3 style="font-size:16px">Топ точек</h3>
+          <div style="display:flex;flex-direction:column;gap:14px;margin-top:12px">${topPoints || '<div class="empty">Нет данных</div>'}</div></div>
+      </div>
+      <div class="dash-duo">
+        <div class="card"><h3 style="font-size:16px;margin-bottom:6px">Последние события</h3>
+          ${activity || '<div class="empty">Событий пока нет</div>'}</div>
+        ${App.user.role === 'ADMIN' ? `<div class="card promo-teal">
+          <h3>Плановая инвентаризация</h3>
+          <p>Назначьте регулярную проверку остатков — ежедневно, еженедельно или ежемесячно.</p>
+          <button class="btn" id="goSched">Настроить</button></div>`
+        : chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
+      </div>
+      ${App.user.role === 'ADMIN' ? `<div class="cards">
         ${chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
         ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
-        ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}
+      </div>` : chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
+      <div class="section-title">Торговые точки</div>
+      <div class="card" style="padding:0;overflow:auto">
+        <table><thead><tr><th>Точка</th><th>BRE</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
+        <tbody>${d.table.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.spv_name ? emp(r.spv_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td>
+          <td>${statusPill(r.shift_status)}</td><td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td>
+          <td class="num"><span class="kpi-link" data-stock-point="${r.point_id}" data-stock-name="${esc(r.name)}">${money(r.stock_value)}</span></td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
       </div>`;
     mountCharts();
     if (window.lucide) lucide.createIcons();
@@ -455,6 +540,7 @@ async function viewDashboard(v) {
     body.querySelectorAll('[data-stock-point]').forEach((a) => a.onclick = () => openStockModal(Number(a.dataset.stockPoint), a.dataset.stockName));
     body.querySelectorAll('#dashPeriod button').forEach((b) => b.onclick = () => { App.state.dashPeriod = b.dataset.per; load(); });
     const gp = $('#goProc', body); if (gp) gp.onclick = () => { App.route = 'procurement'; renderShell(); };
+    const gs = $('#goSched', body); if (gs) gs.onclick = () => { App.route = 'schedules'; renderShell(); };
   };
   App._refresh = load; await load();
 }
@@ -488,8 +574,8 @@ async function openStockModal(pointId, pointName) {
   modal(`<h3>Остатки · ${esc(pointName || d.point_name)}</h3>
     <div class="stock-sum">
       <div><span class="muted">Всего SKU</span><b>${d.summary.total}</b></div>
-      <div><span class="muted">Ниже минимума</span><b class="warn-num">${d.summary.below_min}</b></div>
-      <div><span class="muted">Критично</span><b class="evening-low">${d.summary.critical}</b></div>
+      <div class="tile-warn"><span>Ниже минимума</span><b>${d.summary.below_min}</b></div>
+      <div class="tile-danger"><span>Критично</span><b>${d.summary.critical}</b></div>
       <div><span class="muted">Стоимость</span><b>${money(d.summary.value)}</b></div>
     </div>
     <div class="table-wrap" style="max-height:52vh;overflow:auto;margin-top:14px">
@@ -513,6 +599,28 @@ function chartCanvas(pairs, type = 'bar') {
 function chartCard(title, pairs, type = 'bar') {
   return `<div class="card"><h3>${esc(title)}</h3>${chartCanvas(pairs, type)}</div>`;
 }
+// Draws each point's value above it — the design shows numbers over the line.
+const _valueLabels = {
+  id: 'valueLabels',
+  afterDatasetsDraw(chart) {
+    if (chart.config.type !== 'line' || chart.data.labels.length > 16) return;
+    const { ctx } = chart;
+    const meta = chart.getDatasetMeta(0);
+    const ink = getComputedStyle(document.documentElement).getPropertyValue('--accent-ink').trim();
+    ctx.save();
+    ctx.font = '800 11px Manrope, sans-serif';
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'center';
+    const short = (v) => Math.abs(v) >= 1e9 ? (v / 1e9).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млрд'
+      : Math.abs(v) >= 1e6 ? (v / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млн'
+      : Math.abs(v) >= 1e4 ? (v / 1e3).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' тыс' : num(v);
+    meta.data.forEach((pt, i) => {
+      const v = chart.data.datasets[0].data[i];
+      if (v) ctx.fillText(short(v), Math.min(Math.max(pt.x, 26), chart.width - 26), Math.max(pt.y - 9, 11));
+    });
+    ctx.restore();
+  },
+};
 function mountCharts() {
   const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   while (_chartQueue.length) {
@@ -520,26 +628,47 @@ function mountCharts() {
     const node = document.getElementById(id);
     if (!node || !window.Chart || !pairs.length) continue;
     const horizontal = type === 'bar';
-    const tick = { color: css('--ink-soft'), font: { family: 'Manrope', size: 11, weight: 600 } };
+    const line = type === 'line';
+    const tick = { color: css('--ink-soft'), font: { family: 'Manrope', size: 11, weight: 700 } };
+    const shortTick = { ...tick, callback: (v) => {
+      const n = Number(v);
+      if (Math.abs(n) >= 1e9) return (n / 1e9).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млрд';
+      if (Math.abs(n) >= 1e6) return (n / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млн';
+      if (Math.abs(n) >= 1e4) return (n / 1e3).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' тыс';
+      return n.toLocaleString('ru-RU');
+    } };
+    // teal gradient area under the line, like the mockup
+    let bg = css('--accent');
+    if (line) {
+      const g = node.getContext('2d').createLinearGradient(0, 0, 0, 220);
+      g.addColorStop(0, 'rgba(0, 209, 210, .28)');
+      g.addColorStop(1, 'rgba(0, 209, 210, 0)');
+      bg = g;
+    }
     _chartInstances.push(new Chart(node, {
       type,
+      plugins: [_valueLabels],
       data: {
         labels: pairs.map((p) => p[0]),
         datasets: [{
           data: pairs.map((p) => Number(p[1]) || 0),
-          backgroundColor: type === 'line' ? css('--accent-weak') : css('--accent'),
-          borderColor: css('--accent-2'), borderWidth: type === 'line' ? 2 : 0,
-          borderRadius: 6, barThickness: 14, fill: type === 'line',
-          tension: .35, pointRadius: 2, pointBackgroundColor: css('--accent-2'),
+          backgroundColor: bg,
+          borderColor: css('--accent-2'), borderWidth: line ? 2.5 : 0,
+          borderRadius: 6, barThickness: 14, fill: line,
+          tension: .35, pointRadius: line ? 3.2 : 0,
+          pointBackgroundColor: css('--surface'), pointBorderColor: css('--accent-2'), pointBorderWidth: 2,
         }],
       },
       options: {
         indexAxis: horizontal ? 'y' : 'x',
         maintainAspectRatio: false,
+        layout: line ? { padding: { top: 16 } } : {},
         plugins: { legend: { display: false } },
         scales: {
-          x: { grid: { color: css('--surface-2') }, ticks: tick, beginAtZero: true },
-          y: { grid: { display: !horizontal, color: css('--surface-2') }, ticks: tick, beginAtZero: true },
+          x: { grid: line ? { display: false } : { color: css('--surface-2') }, ticks: horizontal ? shortTick : tick, beginAtZero: true },
+          y: line
+            ? { grid: { color: css('--surface-2') }, ticks: { display: false }, beginAtZero: true, border: { display: false } }
+            : { grid: { display: !horizontal, color: css('--surface-2') }, ticks: tick, beginAtZero: true },
         },
       },
     }));
@@ -551,7 +680,24 @@ function mountCharts() {
 // ============================================================
 async function getMyPoint() {
   const points = await api('/points');
-  return points.find((p) => p.se_connected.some((s) => s.id === App.user.id)) || null;
+  const mine = points.find((p) => p.se_connected.some((s) => s.id === App.user.id)) || null;
+  updateSbShift(mine);
+  return mine;
+}
+
+// Sidebar shift-status card (SE): «Смена открыта · точка · с HH:MM» (per design)
+function updateSbShift(mine) {
+  const box = $('#sbShift'); if (!box) return;
+  if (!mine) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  const open = mine.shift_status === 'open';
+  box.classList.toggle('off', !open);
+  const since = open && mine.last_update
+    ? new Date(mine.last_update.replace(' ', 'T') + (mine.last_update.includes('Z') ? '' : 'Z'))
+        .toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  box.innerHTML = `<div class="t">${open ? 'Смена открыта' : 'Смена не открыта'}</div>
+    <div class="s">Точка «${esc(mine.name)}»${since ? ` · обновлено ${since}` : ''}</div>`;
 }
 
 // admin-defined category order/tabs, cached; invalidated on sku:changed
@@ -710,7 +856,8 @@ async function viewMyShift(v) {
       <button class="btn back sm" id="swPoint">Сменить точку</button>
       <button class="btn secondary sm" id="expBtn">Экспорт отчёта</button>
       <button class="btn ${needInv ? 'ok' : 'secondary'} sm" id="invBtn">${needInv ? '❗ Провести инвентаризацию' : 'Инвентаризация'}</button>
-      <button class="btn dark sm" id="closeBtn">Закрыть смену</button>`);
+      <button class="btn dark sm" id="closeBtn">Закрыть смену</button>`,
+      `Точка «${d.shift.point_name}» · ${ruToday()}`);
     const wrap = el('<div class="fade-in"></div>'); v.appendChild(wrap);
     wrap.innerHTML = `
       <div class="card shift-head">
