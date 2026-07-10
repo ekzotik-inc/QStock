@@ -402,45 +402,53 @@ const NOTIF_ICON = {
   task_status: ['clipboard-list', 'slate'],
   task_comment: ['message-square', 'slate'],
 };
+// Один делегированный обработчик на документ: переживает любые перерисовки
+// топбара (views пересоздают #bell при realtime-обновлениях, из-за чего
+// поэлементный onclick терялся и колокольчик «работал через раз»).
+let _bellWired = false;
 function bindBell() {
-  const b = $('#bell'); if (!b) return;
-  b.onclick = (e) => {
-    if (e.target.closest('.notif-list')) return; // clicks inside the panel
-    let list = $('.notif-list'); if (list) { list.remove(); return; }
-    const unread = App.notifications.filter((n) => !n.is_read);
-    const read = App.notifications.filter((n) => n.is_read);
-    const item = (n) => {
-      const [ic, tone] = NOTIF_ICON[n.type] || ['bell', 'slate'];
-      return `<div class="notif-item ${n.is_read ? '' : 'unread'}">
-        <span class="act-ic tone-${tone}"><i data-lucide="${ic}"></i></span>
-        <div class="notif-body">
-          <div class="notif-text">${esc(notifText(n.type, n.payload))}</div>
-          <div class="notif-time">${relTime(n.created_at)}</div>
-        </div>
-        ${n.is_read ? '' : '<span class="notif-dot"></span>'}</div>`;
-    };
-    const html = `
-      <div class="notif-head">
-        <b>Уведомления</b>${unread.length ? `<span class="notif-count">${unread.length}</span>` : ''}
-        ${unread.length ? '<button class="notif-readall" id="readAll">Прочитать все</button>' : ''}
+  if (_bellWired) return;
+  _bellWired = true;
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest) return;
+    if (e.target.closest('.notif-list')) return;       // клики внутри панели — свои обработчики
+    const list = $('.notif-list');
+    const bell = e.target.closest('#bell');
+    if (!bell) { if (list) list.remove(); return; }     // клик мимо — закрыть
+    if (list) { list.remove(); return; }                // повторный клик — свернуть
+    openNotifPanel(bell);
+  });
+}
+function openNotifPanel(b) {
+  const unread = App.notifications.filter((n) => !n.is_read);
+  const read = App.notifications.filter((n) => n.is_read);
+  const item = (n) => {
+    const [ic, tone] = NOTIF_ICON[n.type] || ['bell', 'slate'];
+    return `<div class="notif-item ${n.is_read ? '' : 'unread'}">
+      <span class="act-ic tone-${tone}"><i data-lucide="${ic}"></i></span>
+      <div class="notif-body">
+        <div class="notif-text">${esc(notifText(n.type, n.payload))}</div>
+        <div class="notif-time">${relTime(n.created_at)}</div>
       </div>
-      ${App.notifications.length
-        ? `${unread.length ? `<div class="notif-sec">Новые</div>${unread.map(item).join('')}` : ''}
-           ${read.length ? `<div class="notif-sec">Ранее</div>${read.slice(0, 20).map(item).join('')}` : ''}`
-        : '<div class="empty" style="padding:34px 20px"><i data-lucide="bell-off"></i><div style="margin-top:8px">Нет уведомлений</div></div>'}`;
-    list = el(`<div class="notif-list">${html}</div>`);
-    b.appendChild(list);
-    if (window.lucide) lucide.createIcons();
-    const ra = list.querySelector('#readAll');
-    if (ra) ra.onclick = async (ev) => {
-      ev.stopPropagation();
-      try { await api('/notifications/read', { method: 'POST', body: {} }); } catch {}
-      App.notifications.forEach((n) => n.is_read = 1);
-      list.remove(); renderBell();
-    };
-    // close on outside click
-    const away = (ev) => { if (!ev.target.closest('.notif-list') && !ev.target.closest('#bell')) { list.remove(); document.removeEventListener('click', away); } };
-    setTimeout(() => document.addEventListener('click', away), 0);
+      ${n.is_read ? '' : '<span class="notif-dot"></span>'}</div>`;
+  };
+  const html = `
+    <div class="notif-head">
+      <b>Уведомления</b>${unread.length ? `<span class="notif-count">${unread.length}</span>` : ''}
+      ${unread.length ? '<button class="notif-readall" id="readAll">Прочитать все</button>' : ''}
+    </div>
+    ${App.notifications.length
+      ? `${unread.length ? `<div class="notif-sec">Новые</div>${unread.map(item).join('')}` : ''}
+         ${read.length ? `<div class="notif-sec">Ранее</div>${read.slice(0, 20).map(item).join('')}` : ''}`
+      : '<div class="empty" style="padding:34px 20px"><i data-lucide="bell-off"></i><div style="margin-top:8px">Нет уведомлений</div></div>'}`;
+  const list = el(`<div class="notif-list">${html}</div>`);
+  b.appendChild(list);
+  if (window.lucide) lucide.createIcons();
+  const ra = list.querySelector('#readAll');
+  if (ra) ra.onclick = async () => {
+    try { await api('/notifications/read', { method: 'POST', body: {} }); } catch {}
+    App.notifications.forEach((n) => n.is_read = 1);
+    list.remove(); renderBell();
   };
 }
 function notifText(type, p = {}) {
