@@ -6,7 +6,7 @@ services:
     runtime: node
     plan: free            # постоянный диск доступен на платных планах; для теста можно сменить на free (без диска)
     region: frankfurt        # ближайший к Узбекистану регион Render
-    branch: claude/crm-inventory-sales-system-1m050r
+    branch: final-project
     buildCommand: npm install --omit=dev   # runtime не нужны devDeps (playwright/тесты) — быстрее и без загрузки браузеров
     startCommand: npm start
     healthCheckPath: /api/health
