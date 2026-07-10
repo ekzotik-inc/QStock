@@ -123,7 +123,12 @@ async function login(login, password) {
   const detail = await req('GET', `/api/shifts/${sid}`, se);
   const lineA = detail.data.lines.find((l) => l.sku_id === skuA);
   check('SHF-09', lineA.current === (lineA.opening + lineA.income - lineA.sales_qty - lineA.writeoff), 'formula holds');
-  check('SHF-16', (await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'sale', qty: 1 })).status === 403, 'BRE cannot op');
+  // Support Exec (BRE) может править смены СВОИХ точек (техпомощь SE); чужих — нет
+  const supOp = await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'adjustment', qty: 200 });
+  check('SHF-16', supOp.status === 200, `support (BRE) can adjust own point (${supOp.status})`);
+  const bre2L = await login('bre2', 'bre123');
+  check('SHF-16b', (await req('POST', `/api/shifts/${sid}/op`, bre2L.data.token, { sku_id: skuA, type: 'sale', qty: 1 })).status === 403, 'foreign support cannot op');
+  check('SHF-16c', (await req('POST', `/api/shifts/${sid}/opening`, bre, { sku_id: skuA, qty: 120 })).status === 200, 'support edits morning stock');
   check('SHF-17', detail.status === 200 && detail.data.totals, 'shift detail+totals');
   check('SHF-18', (await req('GET', '/api/shifts', se)).status === 200, 'list shifts');
 

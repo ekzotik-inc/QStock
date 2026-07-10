@@ -523,6 +523,15 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 /* employee name highlight (IQOS turquoise, premium) */
 .emp { color: var(--mint); font-weight: 700; letter-spacing: .1px; }
 
+/* ---------- Support Exec: дашборд критичных остатков ---------- */
+.ls-card { display: flex; flex-direction: column; gap: 10px; }
+.ls-rows { display: flex; flex-direction: column; gap: 9px; margin: 8px 0 4px; }
+.ls-row { display: grid; grid-template-columns: 1.4fr 1fr auto; gap: 12px; align-items: center; }
+.ls-name { font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-name .muted { display: block; font-size: 11.5px; font-weight: 500; }
+.ls-qty { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.topbar .btn svg, .topbar .btn i { width: 15px; height: 15px; }
+
 /* ---------- Мой профиль: glassmorphic setup card ---------- */
 .pfx-wrap { display: grid; place-items: start center; }
 .pfx-scene { position: relative; width: 100%; max-width: 620px; border-radius: 28px; overflow: hidden;

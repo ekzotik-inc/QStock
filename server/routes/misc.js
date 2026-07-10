@@ -156,6 +156,40 @@ router.put('/skus/:id/logistics', authRequired, (req, res) => {
   res.json({ ok: true, safety_pct: sp, lead_days: ld });
 });
 
+// Critical/low stock across all visible points — the Support Exec dashboard.
+// One call instead of N: per point returns SKUs at/below min from the open shift.
+router.get('/lowstock', authRequired, (req, res) => {
+  const ids = visiblePointIds(req.user);
+  const points = [];
+  let critTotal = 0, lowTotal = 0;
+  for (const pid of ids) {
+    const p = db.prepare('SELECT id, name FROM points WHERE id=?').get(pid);
+    const shift = db.prepare(`SELECT id FROM shifts WHERE point_id=? AND status='open' ORDER BY id DESC LIMIT 1`).get(pid);
+    const rows = [];
+    let value = 0;
+    if (shift) {
+      const lines = db.prepare(`SELECT ss.*, sk.name, sk.category, sk.min_stock, sk.price
+        FROM shift_stock ss JOIN skus sk ON sk.id=ss.sku_id WHERE ss.shift_id=? AND sk.active=1`).all(shift.id);
+      for (const l of lines) {
+        const cur = currentStock(l);
+        value += cur * (l.price || 0);
+        const min = l.min_stock || 0;
+        if (min > 0 && cur <= min) {
+          const status = cur <= min / 2 ? 'critical' : 'low';
+          rows.push({ sku_id: l.sku_id, name: l.name, category: l.category, current: cur, min_stock: min, status });
+        }
+      }
+      rows.sort((a, b) => (a.status === b.status ? a.current / a.min_stock - b.current / b.min_stock : a.status === 'critical' ? -1 : 1));
+    }
+    const crit = rows.filter((r) => r.status === 'critical').length;
+    critTotal += crit; lowTotal += rows.length - crit;
+    points.push({ point_id: pid, point_name: p.name, shift_open: !!shift,
+      stock_value: value, critical: crit, low: rows.length - crit, rows });
+  }
+  points.sort((a, b) => (b.critical - a.critical) || (b.low - a.low));
+  res.json({ critical: critTotal, low: lowTotal, points });
+});
+
 // Procurement plan across all visible points (BRE/ADMIN).
 // Reuses the per-point forecast; marks critical positions (stock only covers lead time).
 router.get('/procurement', authRequired, (req, res) => {

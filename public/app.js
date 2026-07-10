@@ -208,7 +208,7 @@ function navGroups() {
   ];
   if (r === 'BRE') return [
     { h: 'Обзор', items: [
-      ['dashboard', 'Дашборд', 'layout-dashboard'],
+      ['dashboard', 'Остатки', 'layout-dashboard'],
       ['analytics', 'Аналитика', 'bar-chart-3'],
     ]},
     { h: 'Операции', items: [
@@ -216,7 +216,10 @@ function navGroups() {
       ['shifts', 'Смены', 'clock'],
       ['tasksmgr', 'Задачи', 'clipboard-list'],
       ['approvals', 'Заявки', 'inbox'],
+    ]},
+    { h: 'Контроль', items: [
       ['invhistory', 'Инвентаризации', 'clipboard-check'],
+      ['schedules', 'График инвентаризаций', 'calendar-days'],
     ]},
     { h: 'Снабжение', items: [
       ['procurement', 'Закуп', 'shopping-cart'],
@@ -311,7 +314,7 @@ function renderShell() {
   renderRoute();
 }
 
-const roleLabel = (r) => ({ ADMIN: 'Администратор', BRE: 'BRE', SE: 'Sales Expert' }[r] || r);
+const roleLabel = (r) => ({ ADMIN: 'Администратор', BRE: 'Support Exec', SE: 'Sales Expert' }[r] || r);
 
 function initials(name) {
   const parts = String(name || '').trim().split(/\s+/);
@@ -471,7 +474,9 @@ function renderRoute() {
   App._refresh = null;
   const v = $('#view');
   const routes = {
-    dashboard: viewDashboard, monitor: viewDashboard, points: viewPoints,
+    // Support Exec (BRE) lands on the cross-point low-stock dashboard
+    dashboard: App.user.role === 'BRE' ? viewSupportDash : viewDashboard,
+    monitor: viewDashboard, points: viewPoints,
     shift: viewShift, shifts: viewShifts, analytics: viewAnalytics, kpi: viewKpi,
     movements: viewMovements, skus: viewSkus, users: viewUsers, schedules: viewSchedules, audit: viewAudit,
     // SE cabinet
@@ -586,7 +591,7 @@ async function viewDashboard(v) {
       </div>` : chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
       <div class="section-title">Торговые точки</div>
       <div class="card" style="padding:0;overflow:auto">
-        <table><thead><tr><th>Точка</th><th>BRE</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
+        <table><thead><tr><th>Точка</th><th>Саппорт</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
         <tbody>${d.table.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.spv_name ? emp(r.spv_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td>
           <td>${statusPill(r.shift_status)}</td><td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td>
           <td class="num"><span class="kpi-link" data-stock-point="${r.point_id}" data-stock-name="${esc(r.name)}">${money(r.stock_value)}</span></td><td>${fmtDate(r.last_update)}</td></tr>`).join('')}</tbody></table>
@@ -613,6 +618,72 @@ function kpi(label, value, opts = {}) {
     <div class="${valCls}"${valAttr}>${value}</div>${d}</div>`;
 }
 const statusPill = (s) => s === 'open' ? `<span class="pill open"><span class="dot"></span>Открыта</span>` : `<span class="pill closed">Закрыта</span>`;
+
+// ============================================================
+// SUPPORT EXEC (BRE): дашборд критичных остатков по всем точкам
+// ============================================================
+async function viewSupportDash(v) {
+  v.innerHTML = topbar('Остатки по точкам',
+    `<button class="btn sm" id="goProc"><i data-lucide="shopping-cart"></i>Рассчитать закуп</button>
+     <button class="btn secondary sm" id="expProc">Excel по точкам</button>`,
+    `Критичные позиции по вашим точкам · ${ruToday()}`);
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  $('#goProc', v).onclick = () => { App.route = 'procurement'; renderShell(); };
+  $('#expProc', v).onclick = () => window.open('/api/procurement/export.xlsx?days=7&horizon=7&lead=2&safety=20', '_blank');
+  const load = async () => {
+    const d = await api('/lowstock');
+    const openPts = d.points.filter((p) => p.shift_open).length;
+    const stockValue = d.points.reduce((a, p) => a + (p.stock_value || 0), 0);
+    const pointCard = (p) => {
+      const state = !p.shift_open ? 'closed' : p.critical ? 'crit' : p.low ? 'low' : 'ok';
+      const rows = p.rows.slice(0, 6).map((r) => {
+        const pct = Math.min(100, Math.round(r.current / (r.min_stock * 2) * 100));
+        return `<div class="ls-row">
+          <div class="ls-name">${esc(r.name)}<span class="muted">${esc(r.category || '')}</span></div>
+          <div class="track"><div class="fill ${r.status}" style="width:${Math.max(4, pct)}%"></div></div>
+          <div class="ls-qty ${r.status === 'critical' ? 'evening-low' : 'warn-num'}">${num(r.current)}<span class="muted"> / ${num(r.min_stock)}</span></div>
+        </div>`;
+      }).join('');
+      return `<div class="card ls-card ${state === 'crit' ? 'point-crit' : ''}">
+        <div class="row between wrap" style="gap:8px">
+          <div class="row" style="gap:9px"><h3 style="margin:0;font-size:16px">${esc(p.point_name)}</h3>
+            ${p.critical ? `<span class="pill danger">критично · ${p.critical}</span>` : ''}
+            ${p.low ? `<span class="pill inv">низкий · ${p.low}</span>` : ''}
+            ${p.shift_open && !p.rows.length ? '<span class="pill open"><span class="dot"></span>в норме</span>' : ''}
+            ${!p.shift_open ? '<span class="pill closed">смена закрыта</span>' : ''}</div>
+          <span class="muted" style="font-size:12.5px">остаток на ${moneyShort(p.stock_value)}</span>
+        </div>
+        ${p.shift_open
+          ? (p.rows.length
+              ? `<div class="ls-rows">${rows}${p.rows.length > 6 ? `<div class="muted" style="font-size:12px;padding-top:6px">и ещё ${p.rows.length - 6}…</div>` : ''}</div>`
+              : '<div class="muted" style="margin:12px 0;font-size:13px">Все позиции выше минимального остатка 👌</div>')
+          : '<div class="muted" style="margin:12px 0;font-size:13px">Остатки появятся после открытия смены.</div>'}
+        <div class="row" style="justify-content:flex-end;gap:8px">
+          <button class="btn ghost sm" data-stock-point="${p.point_id}" data-stock-name="${esc(p.point_name)}">Все остатки</button>
+          <button class="btn sm" data-mon="${p.point_id}">Монитор</button>
+        </div>
+      </div>`;
+    };
+    body.innerHTML = `
+      <div class="kpis">
+        ${kpi('Мои точки', d.points.length, { icon: 'map-pin', tone: 'teal' })}
+        ${kpi('Смены открыты', `${openPts} / ${d.points.length}`, { icon: 'clock', tone: openPts < d.points.length ? 'warn' : 'ok' })}
+        ${kpi('Критично SKU', d.critical, { icon: 'alert-triangle', tone: d.critical ? 'danger' : 'ok' })}
+        ${kpi('Ниже минимума', d.low, { icon: 'trending-down', tone: d.low ? 'warn' : 'ok' })}
+        ${kpi('Стоимость остатков', moneyShort(stockValue), { accent: true, icon: 'layers', tone: 'teal' })}
+      </div>
+      ${d.critical ? `<div class="card point-crit" style="margin-bottom:20px">
+        <div class="row between wrap"><h3 style="margin:0">⚠️ Требуется срочный завоз <span class="crit-badge">критично · ${d.critical}</span></h3>
+        <button class="btn sm" id="goProc2">Рассчитать закуп</button></div></div>` : ''}
+      <div class="cards">${d.points.map(pointCard).join('')}</div>`;
+    if (window.lucide) lucide.createIcons();
+    body.querySelectorAll('[data-mon]').forEach((b) => b.onclick = () => { App.state.monPid = Number(b.dataset.mon); App.route = 'pointmon'; renderShell(); });
+    body.querySelectorAll('[data-stock-point]').forEach((b) => b.onclick = () => openStockModal(Number(b.dataset.stockPoint), b.dataset.stockName));
+    const gp2 = $('#goProc2', body); if (gp2) gp2.onclick = () => { App.route = 'procurement'; renderShell(); };
+  };
+  App._refresh = load; await load();
+}
 
 // Modal: current stock by SKU for a point (opened from clickable "Остаток" values).
 async function openStockModal(pointId, pointName) {
@@ -909,7 +980,7 @@ async function viewMyShift(v) {
           <div><span class="muted">Остаток вечером</span><b id="stCurrent" class="kpi-link" data-stock-point="${mine.id}" data-stock-name="${esc(mine.name)}">${num(t.current)}</b></div>
         </div>
         <button class="inv-btn ${needInv ? 'armed' : ''}" id="invBtn" ${needInv ? '' : 'disabled'}
-          title="${needInv ? 'Инвентаризация назначена — проведите её' : 'Кнопка станет активной, когда BRE или администратор назначит инвентаризацию'}">
+          title="${needInv ? 'Инвентаризация назначена — проведите её' : 'Кнопка станет активной, когда саппорт или администратор назначит инвентаризацию'}">
           <i data-lucide="clipboard-check"></i>Инвентаризация</button>
       </div>
       ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
@@ -1094,7 +1165,7 @@ async function viewProfile(v) {
         </div>
         ${p.role === 'SE' ? `<div class="pfx-meta">
           <div><span>Точка</span><b>${esc(p.point_name || '—')}</b></div>
-          <div><span>BRE</span><b>${esc(p.bre_name || '—')}${p.bre_phone ? ` · ${esc(p.bre_phone)}` : ''}</b></div>
+          <div><span>Саппорт</span><b>${esc(p.bre_name || '—')}${p.bre_phone ? ` · ${esc(p.bre_phone)}` : ''}</b></div>
           <div><span>СПВ</span><b>${esc(p.spv_name || '—')}${p.spv_phone ? ` · ${esc(p.spv_phone)}` : ''}</b></div>
         </div>` : ''}
         <button class="pfx-save" id="pfxSave">Сохранить изменения</button>
@@ -1205,7 +1276,7 @@ async function viewWriteoff(v) {
     body.innerHTML = `
       <div class="card" style="max-width:620px">
         <h3>Новая заявка</h3>
-        <div class="muted" style="margin-bottom:14px">Заявка уходит на согласование BRE точки. После одобрения остаток меняется автоматически
+        <div class="muted" style="margin-bottom:14px">Заявка уходит на согласование саппорта точки. После одобрения остаток меняется автоматически
           и у SKU на «Моя смена» появится жёлтая отметка (+ возврат / − списание).</div>
         <div class="field"><label>SKU</label><select id="wSku">
           ${groups.map(([cat, items]) => `<optgroup label="${esc(cat)}">${items.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>`).join('')}
@@ -1275,6 +1346,34 @@ async function viewApprovals(v) {
 }
 
 // ---- Монитор точки (BRE/ADMIN) — живая ситуация ----
+// Support Exec: правка утренних остатков открытой смены (каждое изменение
+// уходит отдельным opening_set в аудит и журнал движений).
+function openMorningFix(shift, onDone) {
+  const groups = groupByCategory(shift.lines);
+  modal(`<h3>Утренние остатки — ${esc(shift.shift.point_name)}</h3>
+    <div class="muted" style="margin-bottom:10px">Исправьте значения — сохранятся только изменённые позиции.</div>
+    <div class="manual-open">${groups.map(([cat, items]) => `
+      <div class="cat-label">${esc(cat)}</div>
+      ${items.map((l) => `<div class="row between manual-row"><span>${esc(l.name)}</span>
+        <input class="qty-input mf-open" data-sku="${l.sku_id}" data-old="${l.opening}" type="number" min="0" value="${l.opening}"></div>`).join('')}
+    `).join('')}</div>
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okMf">Сохранить</button></div>`,
+    (bg) => {
+      wireEnterNav(bg, '.mf-open', () => $('#okMf', bg).focus());
+      $('#okMf', bg).onclick = async () => {
+        const changed = [...bg.querySelectorAll('.mf-open')]
+          .filter((i) => Number(i.value) !== Number(i.dataset.old))
+          .map((i) => ({ sku_id: Number(i.dataset.sku), qty: Number(i.value) || 0 }));
+        if (!changed.length) { closeModal(); return; }
+        try {
+          for (const c of changed) await api(`/shifts/${shift.shift.id}/opening`, { method: 'POST', body: c });
+          closeModal(); toast(`Обновлено позиций: ${changed.length}`, 'ok');
+          if (onDone) onDone();
+        } catch {}
+      };
+    });
+}
+
 async function viewPointMonitor(v) {
   const pid = App.state.monPid;
   if (!pid) { App.route = 'points'; return renderShell(); }
@@ -1284,8 +1383,12 @@ async function viewPointMonitor(v) {
     const p = await api('/points/' + pid);
     const shift = p.shift_id ? await api('/shifts/' + p.shift_id) : null;
     const moves = await api(`/movements?point_id=${pid}&limit=40`);
+    const support = App.user.role === 'BRE' || App.user.role === 'ADMIN';
     v.innerHTML = topbar('Монитор · ' + p.name,
-      `${p.shift_id ? `<button class="btn back sm" id="detBtn">Смена подробно</button>` : ''}<button class="btn back sm" id="backBtn">Назад</button>`);
+      `${support && p.shift_id ? `<button class="btn secondary sm" id="fixOpen">Править утренние остатки</button>
+        <button class="btn dark sm" id="supClose">Закрыть смену</button>` : ''}
+       ${support && !p.shift_id ? `<button class="btn sm" id="supOpen">Открыть смену (перенос)</button>` : ''}
+       ${p.shift_id ? `<button class="btn back sm" id="detBtn">Смена подробно</button>` : ''}<button class="btn back sm" id="backBtn">Назад</button>`);
     const body = el('<div class="fade-in"></div>'); v.appendChild(body);
     const t = shift ? shift.totals : null;
     const topSales = shift ? shift.lines.filter((l) => l.sales_qty > 0).sort((a, b) => b.sales_qty - a.sales_qty).slice(0, 10) : [];
@@ -1294,7 +1397,7 @@ async function viewPointMonitor(v) {
       <div class="row between wrap" style="margin-bottom:6px">
         <div>${p.needs_inventory ? '<span class="pill inv">инвентаризация</span>' : statusPill(p.shift_status)}
           ${p.se_connected.length ? '· ' + p.se_connected.map((s) => emp(s.full_name)).join(', ') : '<span class="muted">нет подключённых SE</span>'}</div>
-        <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''} · BRE: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}</div>
+        <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''} · Саппорт: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}</div>
       </div>
       <div class="kpis">
         ${kpi('Продажи сегодня', num(p.sales_qty), { icon: 'shopping-bag', tone: 'teal' })}
@@ -1327,6 +1430,27 @@ async function viewPointMonitor(v) {
     body.querySelectorAll('[data-stock-point]').forEach((a) => a.onclick = () => openStockModal(Number(a.dataset.stockPoint), a.dataset.stockName));
     const backBtn = $('#backBtn', v); if (backBtn) backBtn.onclick = () => { App.route = App.state.monFrom || 'points'; renderShell(); };
     const detBtn = $('#detBtn', v); if (detBtn) detBtn.onclick = () => { App.state.shiftFrom = 'pointmon'; openShift(p.shift_id); };
+    // Support Exec: техпомощь SE по смене (все действия логируются на сервере)
+    const supOpen = $('#supOpen', v);
+    if (supOpen) supOpen.onclick = () => modal(`<h3>Открыть смену</h3>
+      <div class="muted" style="margin-bottom:14px">Смена на точке «${esc(p.name)}» откроется от вашего имени.
+        Утренние остатки будут перенесены с последней закрытой смены — при необходимости их можно поправить.</div>
+      <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okOp">Открыть смену</button></div>`,
+      (bg) => { $('#okOp', bg).onclick = async () => {
+        try { await api('/shifts/open', { method: 'POST', body: { point_id: pid, carryover: true } });
+          closeModal(); toast('Смена открыта', 'ok'); load(); } catch {}
+      }; });
+    const supClose = $('#supClose', v);
+    if (supClose) supClose.onclick = () => modal(`<h3>Закрыть смену</h3>
+      <div class="muted" style="margin-bottom:14px">Смена на точке «${esc(p.name)}» будет закрыта от вашего имени,
+        подключённые SE будут отключены от точки.</div>
+      <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okCl">Закрыть смену</button></div>`,
+      (bg) => { $('#okCl', bg).onclick = async () => {
+        try { await api(`/shifts/${p.shift_id}/close`, { method: 'POST' });
+          closeModal(); toast('Смена закрыта', 'ok'); load(); } catch {}
+      }; });
+    const fixOpen = $('#fixOpen', v);
+    if (fixOpen && shift) fixOpen.onclick = () => openMorningFix(shift, load);
   };
   App._refresh = load; await load();
 }
@@ -1856,7 +1980,7 @@ async function viewShift(v) {
     const d = await api('/shifts/' + shiftId);
     App.socket.emit('watch:point', d.shift.point_id);
     const isOpen = d.shift.status === 'open';
-    const canEdit = isOpen && App.user.role !== 'BRE';
+    const canEdit = isOpen; // поддержка (BRE) тоже может править — сервер проверяет зону ответственности
     const t = d.totals;
     v.innerHTML = topbar(d.shift.point_name + ' · смена #' + d.shift.id,
       `<button class="btn secondary sm" id="xlsBtn">Экспорт в Excel</button>
@@ -2138,7 +2262,7 @@ async function viewPoints(v) {
         ${p.low_stock_count > 0 ? `<span class="crit-badge">малые остатки · ${p.low_stock_count}</span>` : ''}</div>
         ${p.needs_inventory ? '<span class="pill inv">инвент.</span>' : statusPill(p.shift_status)}</div>
       <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''}</div>
-      <div class="muted">BRE: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''}</div>
+      <div class="muted">Саппорт: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''}</div>
       <div style="margin:12px 0">
         <div class="stat-line"><span>Подключено SE</span><b>${p.se_connected.length ? p.se_connected.map((s) => emp(s.full_name)).join(', ') : `0/${p.max_se}`}</b></div>
         <div class="stat-line"><span>Продажи сегодня</span><b>${num(p.sales_qty)} · ${money(p.sales_value)}</b></div>
@@ -2169,8 +2293,8 @@ async function pointForm(p) {
     <div class="field"><label>Адрес</label><input id="pa" value="${esc(p?.address || '')}"></div>
     <div class="row"><div class="field" style="flex:1"><label>Телефон точки</label><input id="pph" value="${esc(p?.phone || '')}" placeholder="+998 __ ___ __ __"></div>
     <div class="field" style="flex:1"><label>Канал</label><select id="pch"><option value="">—</option>${POINT_CHANNELS.map((c) => `<option value="${c}" ${p?.channel === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div></div>
-    <div class="field"><label>BRE (следит за точками)</label><select id="pb"><option value="">—</option>${bres.map((b) => `<option value="${b.id}" ${p?.bre_id === b.id ? 'selected' : ''}>${esc(b.full_name)}</option>`).join('')}</select></div>
-    <div class="row"><div class="field" style="flex:1"><label>СПВ (следит за BRE)</label><input id="pspn" value="${esc(p?.spv_name || '')}" placeholder="ФИО супервайзера"></div>
+    <div class="field"><label>Support Exec (следит за точками)</label><select id="pb"><option value="">—</option>${bres.map((b) => `<option value="${b.id}" ${p?.bre_id === b.id ? 'selected' : ''}>${esc(b.full_name)}</option>`).join('')}</select></div>
+    <div class="row"><div class="field" style="flex:1"><label>СПВ (следит за саппортами)</label><input id="pspn" value="${esc(p?.spv_name || '')}" placeholder="ФИО супервайзера"></div>
     <div class="field" style="flex:1"><label>Телефон СПВ</label><input id="pspp" value="${esc(p?.spv_phone || '')}" placeholder="+998 __ ___ __ __"></div></div>
     <div class="field"><label>Геолокация</label>
       <div class="row" style="gap:10px;align-items:center">
@@ -2254,7 +2378,7 @@ async function viewAnalytics(v) {
       ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
       ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}</div>
       <div class="section-title">По точкам</div>
-      <div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>Точка</th><th>BRE</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th></tr></thead>
+      <div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>Точка</th><th>Саппорт</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th></tr></thead>
       <tbody>${d.table.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.spv_name ? emp(r.spv_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td><td>${statusPill(r.shift_status)}</td>
         <td class="num">${num(r.sales_qty)}</td><td class="num">${money(r.sales_value)}</td><td class="num">${money(r.stock_value)}</td></tr>`).join('')}</tbody></table></div>`;
     mountCharts();
@@ -2286,7 +2410,7 @@ async function viewKpi(v) {
   const ses = users.filter((u) => u.role === 'SE'); const bres = users.filter((u) => u.role === 'BRE');
   body.innerHTML = `<div class="filters">
     <div class="field"><label>Sales Expert</label><select id="seSel"><option value="">—</option>${ses.map((u) => `<option value="${u.id}">${esc(u.full_name)}</option>`).join('')}</select></div>
-    <div class="field"><label>BRE</label><select id="breSel"><option value="">—</option>${bres.map((u) => `<option value="${u.id}">${esc(u.full_name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Support Exec</label><select id="breSel"><option value="">—</option>${bres.map((u) => `<option value="${u.id}">${esc(u.full_name)}</option>`).join('')}</select></div>
     </div><div id="kpiOut"></div>`;
   $('#seSel').onchange = async (e) => { if (!e.target.value) return; const k = await api('/analytics/kpi/se/' + e.target.value);
     $('#kpiOut').innerHTML = `<div class="kpis">${kpi('Открытых смен', k.open_shifts)}${kpi('Закрытых смен', k.closed_shifts)}
@@ -2488,12 +2612,12 @@ async function viewUsers(v) {
   $('#add').onclick = () => userForm();
   const rolePill = (r) => ({
     ADMIN: '<span class="pill closed" style="background:var(--ink);color:var(--surface)">Администратор</span>',
-    BRE: '<span class="pill inv">BRE</span>',
+    BRE: '<span class="pill inv">Support Exec</span>',
     SE: '<span class="pill open">Sales Expert</span>',
   }[r] || esc(r));
   const load = async () => {
     const rows = await api('/users');
-    const groups = [['ADMIN', 'Администраторы'], ['BRE', 'BRE — региональные менеджеры'], ['SE', 'Sales Experts']];
+    const groups = [['ADMIN', 'Администраторы'], ['BRE', 'Support Execs — поддержка точек'], ['SE', 'Sales Experts']];
     body.innerHTML = groups.map(([role, title]) => {
       const us = rows.filter((u) => u.role === role);
       if (!us.length) return '';
@@ -2528,7 +2652,7 @@ function userForm(u) {
   modal(`<h3>${u ? 'Изменить пользователя' : 'Новый пользователь'}</h3>
     <div class="field"><label>ФИО</label><input id="uf" value="${esc(u?.full_name || '')}"></div>
     <div class="row"><div class="field" style="flex:1"><label>Логин</label><input id="ul" value="${esc(u?.login || '')}" ${u ? 'disabled' : ''}></div>
-    <div class="field" style="flex:1"><label>Роль</label><select id="ur"><option value="SE" ${u?.role === 'SE' ? 'selected' : ''}>Sales Expert</option><option value="BRE" ${u?.role === 'BRE' ? 'selected' : ''}>BRE</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Администратор</option></select></div></div>
+    <div class="field" style="flex:1"><label>Роль</label><select id="ur"><option value="SE" ${u?.role === 'SE' ? 'selected' : ''}>Sales Expert</option><option value="BRE" ${u?.role === 'BRE' ? 'selected' : ''}>Support Exec</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Администратор</option></select></div></div>
     <div class="row"><div class="field" style="flex:1"><label>Пароль ${u ? '(оставьте пустым, чтобы не менять)' : ''}</label><input id="up" type="password" autocomplete="new-password"></div>
     <div class="field" style="flex:1"><label>Статус</label><select id="us"><option value="active" ${u?.status === 'active' ? 'selected' : ''}>Активен</option><option value="blocked" ${u?.status === 'blocked' ? 'selected' : ''}>Заблокирован</option></select></div></div>
     <div class="field"><label>Телефон</label><input id="uph" value="${esc(u?.phone || '')}" placeholder="+998 __ ___ __ __"></div>

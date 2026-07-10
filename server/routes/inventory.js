@@ -138,16 +138,21 @@ function computeNext(freq, from) {
   return d.toISOString().slice(0, 10);
 }
 
-router.get('/schedules', requireRole('ADMIN'), (req, res) => {
-  res.json(db.prepare(
-    `SELECT sc.*, p.name AS point_name FROM inventory_schedules sc JOIN points p ON p.id=sc.point_id ORDER BY sc.id DESC`
-  ).all());
+// Schedules: admin sees everything; Support Exec (BRE) only their own points.
+router.get('/schedules', requireRole('BRE', 'ADMIN'), (req, res) => {
+  const rows = db.prepare(
+    `SELECT sc.*, p.name AS point_name, p.bre_id FROM inventory_schedules sc JOIN points p ON p.id=sc.point_id ORDER BY sc.id DESC`
+  ).all();
+  res.json(req.user.role === 'ADMIN' ? rows : rows.filter((r) => r.bre_id === req.user.id));
 });
 
-router.post('/schedules', requireRole('ADMIN'), (req, res) => {
+router.post('/schedules', requireRole('BRE', 'ADMIN'), (req, res) => {
   const { point_ids, frequency, start_date } = req.body || {};
   if (!Array.isArray(point_ids) || !point_ids.length) return res.status(400).json({ error: 'Выберите точки' });
   if (!['daily', 'weekly', 'monthly', 'manual'].includes(frequency)) return res.status(400).json({ error: 'Неверная частота' });
+  if (req.user.role === 'BRE' && !point_ids.every((pid) => canSeePoint(req.user, pid))) {
+    return res.status(403).json({ error: 'Можно планировать только свои точки' });
+  }
   const next = frequency === 'manual' ? (start_date || null) : (start_date || computeNext(frequency, new Date(Date.now() - 86400000)));
   const ins = db.prepare('INSERT INTO inventory_schedules (point_id, frequency, next_run) VALUES (?, ?, ?)');
   const created = [];
@@ -157,8 +162,15 @@ router.post('/schedules', requireRole('ADMIN'), (req, res) => {
   res.json({ ok: true, ids: created });
 });
 
-router.delete('/schedules/:id', requireRole('ADMIN'), (req, res) => {
-  db.prepare('DELETE FROM inventory_schedules WHERE id = ?').run(Number(req.params.id));
+router.delete('/schedules/:id', requireRole('BRE', 'ADMIN'), (req, res) => {
+  const sc = db.prepare('SELECT * FROM inventory_schedules WHERE id = ?').get(Number(req.params.id));
+  if (!sc) return res.status(404).json({ error: 'Не найдено' });
+  if (req.user.role === 'BRE' && !canSeePoint(req.user, sc.point_id)) {
+    return res.status(403).json({ error: 'Не ваша точка' });
+  }
+  db.prepare('DELETE FROM inventory_schedules WHERE id = ?').run(sc.id);
+  audit({ userId: req.user.id, action: 'inventory_schedule_delete', entity: 'inventory_schedule',
+    newValue: { id: sc.id, point_id: sc.point_id }, ip: req.ip });
   res.json({ ok: true });
 });
 

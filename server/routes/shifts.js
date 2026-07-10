@@ -103,8 +103,10 @@ router.post('/open', authRequired, (req, res) => {
   if (req.user.role === 'SE' && !seConnected(req.user.id, pid)) {
     return res.status(403).json({ error: 'Сначала подключитесь к точке' });
   }
-  if (req.user.role === 'BRE') return res.status(403).json({ error: 'BRE не может открывать смены' });
-  if (req.user.role !== 'ADMIN' && req.user.role !== 'SE') return res.status(403).json({ error: 'Нет прав' });
+  // Support Exec (BRE) may open shifts on their own points to help SE
+  if (req.user.role === 'BRE' && !canSeePoint(req.user, pid)) {
+    return res.status(403).json({ error: 'Точка не в вашей зоне ответственности' });
+  }
 
   const existing = db.prepare(`SELECT * FROM shifts WHERE point_id = ? AND status = 'open'`).get(pid);
   if (existing) return res.status(409).json({ error: 'Смена уже открыта' });
@@ -318,7 +320,10 @@ router.post('/:id/close', authRequired, (req, res) => {
   const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shiftId);
   if (!shift) return res.status(404).json({ error: 'Не найдено' });
   if (shift.status === 'closed') return res.status(400).json({ error: 'Смена уже закрыта' });
-  if (req.user.role === 'BRE') return res.status(403).json({ error: 'BRE не может изменять смены' });
+  // Support Exec (BRE) may close shifts on their own points to help SE
+  if (req.user.role === 'BRE' && !canSeePoint(req.user, shift.point_id)) {
+    return res.status(403).json({ error: 'Точка не в вашей зоне ответственности' });
+  }
   if (req.user.role === 'SE' && !seConnected(req.user.id, shift.point_id)) {
     return res.status(403).json({ error: 'Нет доступа к точке' });
   }
@@ -369,7 +374,10 @@ function guardOpenWritable(req, res, shiftId) {
   const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shiftId);
   if (!shift) { res.status(404).json({ error: 'Смена не найдена' }); return null; }
   if (shift.status === 'closed') { res.status(400).json({ error: 'Закрытую смену редактировать нельзя' }); return null; }
-  if (req.user.role === 'BRE') { res.status(403).json({ error: 'BRE не может изменять данные смен' }); return null; }
+  // Support Exec (BRE) may edit shift data on their own points (all writes audited)
+  if (req.user.role === 'BRE' && !canSeePoint(req.user, shift.point_id)) {
+    res.status(403).json({ error: 'Точка не в вашей зоне ответственности' }); return null;
+  }
   if (req.user.role === 'SE' && !seConnected(req.user.id, shift.point_id)) {
     res.status(403).json({ error: 'Нет доступа к точке' }); return null;
   }
