@@ -18,6 +18,7 @@ const { router: inventoryRoutes } = require('./routes/inventory');
 const analyticsRoutes = require('./routes/analytics');
 const notesRoutes = require('./routes/notes');
 const miscRoutes = require('./routes/misc');
+const aiRoutes = require('./routes/ai');
 
 const app = express();
 app.set('trust proxy', true);
@@ -49,6 +50,7 @@ app.use('/api/shifts', authRequired, shiftsRoutes);
 app.use('/api/inventory', authRequired, inventoryRoutes);
 app.use('/api/analytics', authRequired, analyticsRoutes);
 app.use('/api/notes', authRequired, notesRoutes);
+app.use('/api/ai', authRequired, aiRoutes);
 app.use('/api', authRequired, miscRoutes);
 
 // --- static frontend ---

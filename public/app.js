@@ -480,10 +480,12 @@ function renderRoute() {
 // DASHBOARD (ADMIN / BRE)
 // ============================================================
 async function viewDashboard(v) {
-  v.innerHTML = topbar('Дашборд', `<button class="btn secondary sm" id="exp">Экспорт в Excel</button>`,
+  v.innerHTML = topbar('Дашборд', `<button class="btn secondary sm" id="exp">Экспорт в Excel</button>
+    <button class="btn dark sm" id="aiPlan"><i data-lucide="sparkles"></i>AI-план</button>`,
     `Обзор всех точек · ${ruToday()}`);
   const body = el('<div class="grid"></div>'); v.appendChild(body);
   $('#exp').onclick = () => window.open('/api/analytics/export.xlsx', '_blank');
+  $('#aiPlan').onclick = () => openAiPlan();
   bindBell();
   const load = async () => {
     const per = App.state.dashPeriod || 'week';
@@ -596,12 +598,14 @@ const statusPill = (s) => s === 'open' ? `<span class="pill open"><span class="d
 async function viewSupportDash(v) {
   v.innerHTML = topbar('Остатки по точкам',
     `<button class="btn sm" id="goProc"><i data-lucide="shopping-cart"></i>Рассчитать закуп</button>
-     <button class="btn secondary sm" id="expProc">Excel по точкам</button>`,
+     <button class="btn secondary sm" id="expProc">Excel по точкам</button>
+     <button class="btn dark sm" id="aiPlan"><i data-lucide="sparkles"></i>AI-план</button>`,
     `Критичные позиции по вашим точкам · ${ruToday()}`);
   bindBell();
   const body = el('<div class="fade-in"></div>'); v.appendChild(body);
   $('#goProc', v).onclick = () => { App.route = 'procurement'; renderShell(); };
   $('#expProc', v).onclick = () => window.open('/api/procurement/export.xlsx?days=7&horizon=7&lead=2&safety=20', '_blank');
+  $('#aiPlan', v).onclick = () => openAiPlan();
   const load = async () => {
     const d = await api('/lowstock');
     const openPts = d.points.filter((p) => p.shift_open).length;
@@ -654,6 +658,41 @@ async function viewSupportDash(v) {
     const gp2 = $('#goProc2', body); if (gp2) gp2.onclick = () => { App.route = 'procurement'; renderShell(); };
   };
   App._refresh = load; await load();
+}
+
+// AI-план (Claude advisor tool): исполнитель Sonnet 5 готовит план,
+// советник Opus 4.8 управляет стратегией и согласованием — сам не исполняет.
+function openAiPlan() {
+  modal(`<h3>AI-план</h3>
+    <div class="muted" style="margin-bottom:12px">Опишите задачу — ассистент составит план и распределит
+      задачи по исполнителям. Стратегию согласует модель-советник, текущие остатки подставятся автоматически.</div>
+    <textarea id="aiPrompt" class="tbl-search" style="width:100%;height:110px;resize:vertical"
+      placeholder="Например: спланируй пополнение точек на неделю и распредели задачи между SE и саппортом"></textarea>
+    <div id="aiOut" style="margin-top:14px"></div>
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Закрыть</button>
+      <button class="btn ok" id="aiGo">Составить план</button></div>`,
+    (bg) => {
+      $('#aiGo', bg).onclick = async () => {
+        const prompt = $('#aiPrompt', bg).value.trim();
+        if (!prompt) return toast('Опишите задачу', 'warn');
+        const out = $('#aiOut', bg);
+        $('#aiGo', bg).disabled = true;
+        out.innerHTML = '<div class="muted">Советник и исполнитель работают… (до минуты)</div>';
+        try {
+          const r = await fetch('/api/ai/plan', { method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Ошибка AI');
+          out.innerHTML = `<div class="card" style="box-shadow:none;background:var(--surface-3);max-height:46vh;overflow:auto">
+            <div style="white-space:pre-wrap;font-size:14px;line-height:1.55">${esc(d.text)}</div></div>
+            <div class="muted" style="font-size:12px;margin-top:8px">Исполнитель: ${esc(d.executor)} ·
+              советник ${esc(d.advisor)} ${d.advisor_used ? 'участвовал в планировании' : 'не потребовался'}</div>`;
+        } catch (e) {
+          out.innerHTML = `<div class="login-err">${esc(e.message)}</div>`;
+        }
+        $('#aiGo', bg).disabled = false;
+      };
+    }, 'wide');
 }
 
 // Modal: current stock by SKU for a point (opened from clickable "Остаток" values).

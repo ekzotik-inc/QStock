@@ -17,5 +17,7 @@ services:
         value: "1"             # на случай, если devDeps всё же установятся — не тянуть браузеры Playwright
       - key: QSTOCK_SECRET
         generateValue: true  # Render сам сгенерирует надёжный секрет
+      - key: ANTHROPIC_API_KEY
+        sync: false          # задать в Render Dashboard — ключ Claude API для AI-плана (advisor tool)
       - key: QSTOCK_DB
         value: /opt/render/project/src/data/qstock.db   # writable; на free диске нет, данные временные
