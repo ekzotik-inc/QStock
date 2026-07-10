@@ -277,7 +277,6 @@ function renderShell() {
         <div class="brand"><span class="logo">Q</span><span>Stock</span></div>
         <nav class="nav">${groups.map((g) =>
           `<div class="nav-group"><div class="nav-group-title">${g.h}</div>${g.items.map(link).join('')}</div>`).join('')}</nav>
-        ${App.user.role === 'SE' ? '<div class="sb-shift off" id="sbShift" style="display:none"></div>' : ''}
         <div class="sb-foot">
           <div class="me click" id="meBtn" title="Мой профиль">
             <div class="avatar" style="${App.user.avatar_color ? `background:${esc(App.user.avatar_color)}` : ''}">${App.user.avatar ? `<img src="${App.user.avatar}" alt="">` : esc(initials(App.user.full_name))}</div>
@@ -730,24 +729,7 @@ function mountCharts() {
 // ============================================================
 async function getMyPoint() {
   const points = await api('/points');
-  const mine = points.find((p) => p.se_connected.some((s) => s.id === App.user.id)) || null;
-  updateSbShift(mine);
-  return mine;
-}
-
-// Sidebar shift-status card (SE): «Смена открыта · точка · с HH:MM» (per design)
-function updateSbShift(mine) {
-  const box = $('#sbShift'); if (!box) return;
-  if (!mine) { box.style.display = 'none'; return; }
-  box.style.display = '';
-  const open = mine.shift_status === 'open';
-  box.classList.toggle('off', !open);
-  const since = open && mine.last_update
-    ? new Date(mine.last_update.replace(' ', 'T') + (mine.last_update.includes('Z') ? '' : 'Z'))
-        .toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-    : '';
-  box.innerHTML = `<div class="t">${open ? 'Смена открыта' : 'Смена не открыта'}</div>
-    <div class="s">Точка «${esc(mine.name)}»${since ? ` · обновлено ${since}` : ''}</div>`;
+  return points.find((p) => p.se_connected.some((s) => s.id === App.user.id)) || null;
 }
 
 // admin-defined category order/tabs, cached; invalidated on sku:changed
