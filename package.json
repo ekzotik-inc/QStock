@@ -1,0 +1,30 @@
+{
+  "name": "qstock",
+  "version": "1.6.0",
+  "description": "Internal CRM for SKU stock and sales tracking across retail points",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
+    "test:api": "node tests/run.js",
+    "test:ui": "node tests/ui.js",
+    "test:sched": "node --disable-warning=ExperimentalWarning tests/scheduler.js"
+  },
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0",
+    "socket.io-client": "^4.7.5"
+  }
+}

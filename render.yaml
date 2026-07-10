@@ -1,0 +1,21 @@
+# Render.com Blueprint for QStock.
+# В Render: New + → Blueprint → выбрать этот репозиторий — он прочитает этот файл.
+services:
+  - type: web
+    name: qstock
+    runtime: node
+    plan: free            # постоянный диск доступен на платных планах; для теста можно сменить на free (без диска)
+    region: frankfurt        # ближайший к Узбекистану регион Render
+    branch: claude/crm-inventory-sales-system-1m050r
+    buildCommand: npm install --omit=dev   # runtime не нужны devDeps (playwright/тесты) — быстрее и без загрузки браузеров
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.2          # node:sqlite доступен без флага начиная с поздних 22.x (в 22.11 ещё за флагом)
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "1"             # на случай, если devDeps всё же установятся — не тянуть браузеры Playwright
+      - key: QSTOCK_SECRET
+        generateValue: true  # Render сам сгенерирует надёжный секрет
+      - key: QSTOCK_DB
+        value: /opt/render/project/src/data/qstock.db   # writable; на free диске нет, данные временные
