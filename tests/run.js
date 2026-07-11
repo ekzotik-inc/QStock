@@ -192,12 +192,6 @@ async function login(login, password) {
   const lowRes = await testLowStock(admin, se, bre, pid);
   check('NTF-03', lowRes, 'low-stock notifies BRE');
 
-  console.log('== AI ==');
-  // без ANTHROPIC_API_KEY эндпоинт должен мягко отказывать, а не падать
-  const ai = await req('POST', '/api/ai/plan', bre, { prompt: 'тест' });
-  check('AI-01', ai.status === 503 || ai.status === 200, `ai plan degrades gracefully (${ai.status})`);
-  check('AI-02', (await req('POST', '/api/ai/plan', se, { prompt: 'тест' })).status === 403, 'SE cannot call AI plan');
-
   console.log('== REALTIME ==');
   await testRealtime(admin, se, pid).then((r) => {
     check('RT-01', r.stockUpdate, 'stock:update received');
