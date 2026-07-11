@@ -6,7 +6,13 @@ const { audit, currentStock, today } = require('../util');
 const { canSeePoint, seConnected } = require('../access');
 const { recordMovement, checkLowStock, emitStockLine } = require('../stock');
 const { sendXlsx } = require('../xlsx');
+const { saveAttachment } = require('./attachments');
 const rt = require('../realtime');
+
+function numOrNull(v) {
+  const n = Number(v);
+  return v != null && v !== '' && isFinite(n) ? n : null;
+}
 
 const router = express.Router();
 
@@ -31,16 +37,20 @@ function shiftDetail(shiftId) {
   // shift_stock row yet — e.g. imported after the shift opened) plus any rows
   // with activity on since-disabled SKUs. Closed shifts stay a frozen snapshot.
   const linesSql = shift.status === 'open'
-    ? `SELECT s.id AS sku_id, s.name, s.article, s.category, s.price, s.min_stock,
+    ? `SELECT s.id AS sku_id, s.name, s.article, s.category, s.price,
+              COALESCE(psm.min_stock, s.min_stock) AS min_stock,
               COALESCE(ss.opening,0) opening, COALESCE(ss.income,0) income,
               COALESCE(ss.sales_qty,0) sales_qty, COALESCE(ss.writeoff,0) writeoff,
               COALESCE(ss.adjust,0) adjust
        FROM skus s LEFT JOIN shift_stock ss ON ss.sku_id = s.id AND ss.shift_id = ?
+       LEFT JOIN point_sku_min psm ON psm.sku_id = s.id AND psm.point_id = ${shift.point_id}
        WHERE s.active = 1
           OR (ss.id IS NOT NULL AND (ss.opening<>0 OR ss.income<>0 OR ss.sales_qty<>0 OR ss.writeoff<>0 OR ss.adjust<>0))
        ORDER BY s.category, s.name`
-    : `SELECT ss.*, s.name, s.article, s.category, s.price, s.min_stock
+    : `SELECT ss.*, s.name, s.article, s.category, s.price,
+              COALESCE(psm.min_stock, s.min_stock) AS min_stock
        FROM shift_stock ss JOIN skus s ON s.id = ss.sku_id
+       LEFT JOIN point_sku_min psm ON psm.sku_id = s.id AND psm.point_id = ${shift.point_id}
        WHERE ss.shift_id = ? ORDER BY s.category, s.name`;
   const lines = db.prepare(linesSql).all(shiftId).map((r) => {
     const cur = currentStock(r);
@@ -52,7 +62,11 @@ function shiftDetail(shiftId) {
     acc.sales_value += l.sales_value; acc.stock_value += l.stock_value;
     return acc;
   }, { opening: 0, income: 0, sales_qty: 0, writeoff: 0, current: 0, sales_value: 0, stock_value: 0 });
-  return { shift, lines, totals };
+  const photos = {};
+  for (const r of db.prepare('SELECT kind, COUNT(*) c FROM attachments WHERE shift_id=? GROUP BY kind').all(shiftId)) {
+    photos[r.kind] = r.c;
+  }
+  return { shift, lines, totals, photos };
 }
 
 // list shifts (filtered by visibility)
@@ -94,9 +108,9 @@ router.get('/:id/export.xlsx', authRequired, (req, res) => {
   sendXlsx(res, `shift-${detail.shift.id}.xlsx`, [header, ...rows], 'Смена');
 });
 
-// open a shift. body: { point_id, carryover: bool, opening: [{sku_id, qty}] }
+// open a shift. body: { point_id, carryover: bool, opening: [{sku_id, qty}], lat?, lng?, photo? }
 router.post('/open', authRequired, (req, res) => {
-  const { point_id, carryover, opening } = req.body || {};
+  const { point_id, carryover, opening, lat, lng, photo } = req.body || {};
   const pid = Number(point_id);
   const point = db.prepare('SELECT * FROM points WHERE id = ?').get(pid);
   if (!point) return res.status(404).json({ error: 'Точка не найдена' });
@@ -111,22 +125,26 @@ router.post('/open', authRequired, (req, res) => {
   const existing = db.prepare(`SELECT * FROM shifts WHERE point_id = ? AND status = 'open'`).get(pid);
   if (existing) return res.status(409).json({ error: 'Смена уже открыта' });
 
+  const prev = db.prepare(
+    `SELECT * FROM shifts WHERE point_id = ? AND status='closed' ORDER BY id DESC LIMIT 1`
+  ).get(pid);
+  // пересменка: если смену открывает не тот SE, который закрывал предыдущую —
+  // обязательная инвентаризация перед закрытием новой смены
+  const handover = req.user.role === 'SE' && prev && prev.closed_by && prev.closed_by !== req.user.id ? 1 : 0;
+
   const tx = db.transaction(() => {
     const info = db.prepare(
-      `INSERT INTO shifts (point_id, status, business_date, opened_by) VALUES (?, 'open', ?, ?)`
-    ).run(pid, today(), req.user.id);
+      `INSERT INTO shifts (point_id, status, business_date, opened_by, needs_inventory, open_lat, open_lng)
+       VALUES (?, 'open', ?, ?, ?, ?, ?)`
+    ).run(pid, today(), req.user.id, handover, numOrNull(lat), numOrNull(lng));
     const shiftId = info.lastInsertRowid;
+    if (photo) saveAttachment({ kind: 'shift_open', pointId: pid, shiftId, userId: req.user.id, data: photo });
 
     // determine opening values
     let openings = {}; // sku_id -> qty
-    if (carryover) {
-      const prev = db.prepare(
-        `SELECT * FROM shifts WHERE point_id = ? AND status='closed' ORDER BY id DESC LIMIT 1`
-      ).get(pid);
-      if (prev) {
-        const rows = db.prepare('SELECT * FROM shift_stock WHERE shift_id = ?').all(prev.id);
-        for (const r of rows) openings[r.sku_id] = currentStock(r);
-      }
+    if (carryover && prev) {
+      const rows = db.prepare('SELECT * FROM shift_stock WHERE shift_id = ?').all(prev.id);
+      for (const r of rows) openings[r.sku_id] = currentStock(r);
     }
     if (Array.isArray(opening)) {
       for (const o of opening) openings[Number(o.sku_id)] = Number(o.qty) || 0;
@@ -148,7 +166,8 @@ router.post('/open', authRequired, (req, res) => {
   });
   const shiftId = tx();
   audit({ userId: req.user.id, action: 'shift_open', entity: 'shift',
-    newValue: { shift_id: shiftId, point_id: pid, carryover: !!carryover }, ip: req.ip });
+    newValue: { shift_id: shiftId, point_id: pid, carryover: !!carryover,
+      handover_inventory: !!handover, geo: numOrNull(lat) != null }, ip: req.ip });
   rt.emitPoint(pid, 'shift:changed', { pointId: pid, shiftId, status: 'open' });
   res.json(shiftDetail(shiftId));
 });
@@ -288,6 +307,7 @@ router.post('/:id/income-batch', authRequired, (req, res) => {
   const shift = guardOpenWritable(req, res, shiftId);
   if (!shift) return;
   const items = (req.body && req.body.items) || [];
+  const photos = (req.body && req.body.photos) || (req.body && req.body.photo ? [req.body.photo] : []);
   if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Нет данных поступления' });
   const applied = [];
   const tx = db.transaction(() => {
@@ -309,7 +329,14 @@ router.post('/:id/income-batch', authRequired, (req, res) => {
   });
   tx();
   if (!applied.length) return res.status(400).json({ error: 'Укажите количество хотя бы для одного SKU' });
-  audit({ userId: req.user.id, action: 'income_batch', entity: 'shift', newValue: { shift_id: shiftId, items: applied }, ip: req.ip });
+  let savedPhotos = 0;
+  if (Array.isArray(photos)) {
+    for (const p of photos.slice(0, 5)) {
+      if (saveAttachment({ kind: 'invoice', pointId: shift.point_id, shiftId, userId: req.user.id, data: p })) savedPhotos++;
+    }
+  }
+  audit({ userId: req.user.id, action: 'income_batch', entity: 'shift',
+    newValue: { shift_id: shiftId, items: applied, photos: savedPhotos }, ip: req.ip });
   for (const a of applied) emitStockLine(shift.point_id, shiftId, a.skuId);
   res.json({ ok: true, applied: applied.length });
 });
@@ -332,11 +359,15 @@ router.post('/:id/close', authRequired, (req, res) => {
   if (shift.needs_inventory) {
     return res.status(409).json({ error: 'Требуется инвентаризация. Закрытие смены невозможно.' });
   }
+  const { lat, lng, photo } = req.body || {};
   const mismatch = shift.opened_by && shift.opened_by !== req.user.id ? 1 : 0;
-  db.prepare(`UPDATE shifts SET status='closed', closed_by=?, closed_at=datetime('now'), closed_by_other=? WHERE id=?`)
-    .run(req.user.id, mismatch, shiftId);
+  db.prepare(`UPDATE shifts SET status='closed', closed_by=?, closed_at=datetime('now'), closed_by_other=?,
+      close_lat=?, close_lng=? WHERE id=?`)
+    .run(req.user.id, mismatch, numOrNull(lat), numOrNull(lng), shiftId);
+  if (photo) saveAttachment({ kind: 'shift_close', pointId: shift.point_id, shiftId, userId: req.user.id, data: photo });
   disconnectAllSE(shift.point_id);   // shift closed -> reset connected SE to 0
-  audit({ userId: req.user.id, action: 'shift_close', entity: 'shift', newValue: { shift_id: shiftId }, ip: req.ip });
+  audit({ userId: req.user.id, action: 'shift_close', entity: 'shift',
+    newValue: { shift_id: shiftId, geo: numOrNull(lat) != null }, ip: req.ip });
   if (mismatch) audit({ userId: req.user.id, action: 'shift_close_anomaly', entity: 'shift',
     newValue: { shift_id: shiftId, opened_by: shift.opened_by, closed_by: req.user.id }, ip: req.ip });
   rt.emitPoint(shift.point_id, 'shift:changed', { pointId: shift.point_id, shiftId, status: 'closed' });

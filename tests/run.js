@@ -199,6 +199,88 @@ async function login(login, password) {
     check('RT-03', r.rejectedNoToken, 'socket rejects no token');
   }).catch((e) => { check('RT-01', false, 'rt error ' + e.message); check('RT-02', false, ''); check('RT-03', false, ''); });
 
+  console.log('== BR (гео/фото/минимумы/пересменка/визиты) ==');
+  {
+    const PHOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==';
+    // ensure point free, se connected
+    const p0 = (await req('GET', '/api/points', admin)).data.find((x) => x.id === pid);
+    if (p0.shift_id) await req('POST', `/api/shifts/${p0.shift_id}/force-close`, admin);
+    await req('POST', `/api/points/${pid}/connect`, se);
+    // предыдущая смена закрыта админом (force-close) — значит для SE это пересменка:
+    // нейтрализуем состояние циклом «открыл → инвентаризация → закрыл» от имени se
+    const o0 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: true });
+    if (o0.data.shift.needs_inventory) {
+      await req('POST', '/api/inventory/perform', se, { shift_id: o0.data.shift.id, items: [{ sku_id: skuA, new_qty: 50 }] });
+    }
+    await req('POST', `/api/shifts/${o0.data.shift.id}/close`, se, {});
+    await req('POST', `/api/points/${pid}/connect`, se);
+    // geo + photo on open
+    const o1 = await req('POST', '/api/shifts/open', se, {
+      point_id: pid, carryover: false, opening: [{ sku_id: skuA, qty: 100 }],
+      lat: 41.31, lng: 69.28, photo: PHOTO,
+    });
+    check('BR-01', o1.status === 200 && o1.data.shift.open_lat === 41.31 && o1.data.shift.open_lng === 69.28, 'open saves geo');
+    check('BR-02', o1.data.photos && o1.data.photos.shift_open === 1, 'open saves photo');
+    const att = await req('GET', `/api/attachments?shift_id=${o1.data.shift.id}`, bre);
+    check('BR-03', att.status === 200 && att.data.some((a) => a.kind === 'shift_open' && String(a.data).startsWith('data:image/')), 'attachments listed for support');
+    // invoice photos with income-batch
+    const ib = await req('POST', `/api/shifts/${o1.data.shift.id}/income-batch`, se,
+      { items: [{ sku_id: skuA, qty: 3 }], photos: [PHOTO, PHOTO] });
+    check('BR-04', ib.status === 200, 'income-batch with photos');
+    const att2 = await req('GET', `/api/attachments?shift_id=${o1.data.shift.id}`, se);
+    check('BR-05', att2.status === 200 && att2.data.filter((a) => a.kind === 'invoice').length === 2, 'invoice photos stored');
+    // geo + photo on close
+    const cl1 = await req('POST', `/api/shifts/${o1.data.shift.id}/close`, se, { lat: 41.32, lng: 69.29, photo: PHOTO });
+    check('BR-06', cl1.status === 200 && cl1.data.shift.close_lat === 41.32 && cl1.data.photos.shift_close === 1, 'close saves geo+photo');
+    // пересменка: same SE reopens -> no inventory required
+    await req('POST', `/api/points/${pid}/connect`, se);
+    const o2 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: true });
+    check('BR-07', o2.status === 200 && !o2.data.shift.needs_inventory, 'same SE: no handover inventory');
+    await req('POST', `/api/shifts/${o2.data.shift.id}/close`, se, {});
+    // пересменка: another SE opens -> mandatory inventory
+    await req('POST', `/api/points/${pid}/connect`, se2);
+    const o3 = await req('POST', '/api/shifts/open', se2, { point_id: pid, carryover: true });
+    check('BR-08', o3.status === 200 && o3.data.shift.needs_inventory === 1, 'handover SE: inventory required');
+    const clBlocked = await req('POST', `/api/shifts/${o3.data.shift.id}/close`, se2, {});
+    check('BR-09', clBlocked.status === 409, 'close blocked until handover inventory');
+    await req('POST', `/api/shifts/${o3.data.shift.id}/force-close`, admin);
+    // individual min stock per point
+    const gmin = await req('GET', `/api/points/${pid}/min-stocks`, bre);
+    check('BR-10', gmin.status === 200 && gmin.data.some((r) => r.sku_id === skuA), 'min-stocks list');
+    const pmin = await req('PUT', `/api/points/${pid}/min-stocks`, bre, { items: [{ sku_id: skuA, min_stock: 500 }] });
+    check('BR-11', pmin.status === 200 && pmin.data.set === 1, 'support sets point min');
+    check('BR-12', (await req('PUT', `/api/points/${pid}/min-stocks`, se, { items: [] })).status === 403, 'SE cannot set point min');
+    await req('POST', `/api/points/${pid}/connect`, se);
+    const o4 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, opening: [{ sku_id: skuA, qty: 100 }] });
+    const findLow = (d) => {
+      const pt = (d.points || []).find((x) => x.point_id === pid);
+      return pt ? pt.rows.find((r) => r.sku_id === skuA) : null;
+    };
+    const low = await req('GET', '/api/lowstock', bre);
+    const lowRow = findLow(low.data);
+    check('BR-13', low.status === 200 && lowRow && Number(lowRow.min_stock) === 500, `point min override drives lowstock (min ${lowRow && lowRow.min_stock})`);
+    await req('PUT', `/api/points/${pid}/min-stocks`, bre, { items: [{ sku_id: skuA, min_stock: null }] });
+    const lowRow2 = findLow((await req('GET', '/api/lowstock', bre)).data);
+    check('BR-14', !lowRow2 || Number(lowRow2.min_stock) !== 500, 'override removal restores global min');
+    // визит Support Exec: сверка SKU + отчёт
+    const stA = (await req('GET', `/api/points/${pid}/stock`, bre)).data.rows.find((r) => r.sku_id === skuA);
+    const vis = await req('POST', '/api/visits', bre, {
+      point_id: pid, lat: 41.3, lng: 69.2, notes: 'плановый визит',
+      photo: PHOTO,
+      checks: [{ sku_id: skuA, actual_qty: stA.current }, { sku_id: skuB, actual_qty: 9999 }],
+    });
+    check('BR-15', vis.status === 200 && vis.data.checked === 2 && vis.data.mismatches === 1, `visit report (${vis.data && vis.data.mismatches} mismatch)`);
+    check('BR-16', vis.data.checks.find((c) => c.sku_id === skuA).confirmed === 1, 'matching qty confirmed');
+    const vlist = await req('GET', '/api/visits', admin);
+    check('BR-17', vlist.status === 200 && vlist.data.some((r) => r.id === vis.data.id), 'admin sees visits');
+    check('BR-18', (await req('GET', '/api/visits', se)).status === 403, 'SE cannot list visits');
+    const bre2T = (await login('bre2', 'bre123')).data.token;
+    check('BR-19', (await req('GET', `/api/visits/${vis.data.id}`, bre2T)).status === 403, 'foreign support cannot read visit');
+    await req('POST', `/api/shifts/${o4.data.shift.id}/force-close`, admin);
+    const visNoShift = await req('POST', '/api/visits', bre, { point_id: pid, checks: [{ sku_id: skuA, actual_qty: 1 }] });
+    check('BR-20', visNoShift.status === 409, 'visit requires open shift');
+  }
+
   // UX stories are frontend; mark as code-present (served)
   const html = await (await fetch(BASE + '/')).text();
   check('UX-01', html.includes('app.js'), 'SPA served');

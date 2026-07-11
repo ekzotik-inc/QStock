@@ -208,6 +208,7 @@ function navGroups() {
       ['shifts', 'Смены', 'clock'],
     ]},
     { h: 'Контроль', items: [
+      ['visits', 'Визиты в точки', 'map-pinned'],
       ['invhistory', 'Инвентаризации', 'clipboard-check'],
       ['schedules', 'График инвентаризаций', 'calendar-days'],
     ]},
@@ -225,6 +226,7 @@ function navGroups() {
     { h: 'Операции', items: [
       ['points', 'Торговые точки', 'map-pin'],
       ['shifts', 'Смены', 'clock'],
+      ['visits', 'Визиты в точки', 'map-pinned'],
       ['invhistory', 'Инвентаризации', 'clipboard-check'],
     ]},
     { h: 'Снабжение', items: [
@@ -454,7 +456,7 @@ function renderRoute() {
     // SE cabinet
     myshift: viewMyShift, arrival: viewArrival, sestock: viewSeStock,
     notes: viewNotes, shifthistory: viewShiftHistory,
-    pointmon: viewPointMonitor, procurement: viewProcurement,
+    pointmon: viewPointMonitor, procurement: viewProcurement, visits: viewVisits,
     // inventory history
     seinv: viewInvHistory, invhistory: viewInvHistory,
     profile: viewProfile,
@@ -896,6 +898,107 @@ function pointPicker(v, body) {
 }
 
 // ---- Моя смена ----
+// ---- Гео + камера (доработки BR) ----
+function getGeo(timeoutMs = 6000) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    let done = false;
+    const fin = (v2) => { if (!done) { done = true; resolve(v2); } };
+    const t = setTimeout(() => fin(null), timeoutMs + 500);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { clearTimeout(t); fin({ lat: p.coords.latitude, lng: p.coords.longitude }); },
+      () => { clearTimeout(t); fin(null); },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 });
+  });
+}
+
+// файл -> сжатый data-URL (JPEG, длинная сторона 1280px)
+function fileToPhoto(f, max = 1280) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL('image/jpeg', .8));
+    };
+    img.onerror = () => { URL.revokeObjectURL(img.src); resolve(null); };
+    img.src = URL.createObjectURL(f);
+  });
+}
+
+// Модалка камеры. allowUpload=true добавляет «Загрузить файл» (для накладных).
+// Возвращает data-URL или null (отмена).
+function capturePhoto({ title = 'Фото', allowUpload = false } = {}) {
+  return new Promise((resolve) => {
+    let stream = null, done = false;
+    const bg = el(`<div class="modal-bg"><div class="modal cam-modal"><button class="modal-x" title="Закрыть">✕</button>
+      <h3>${esc(title)}</h3>
+      <div class="cam-box">
+        <video id="camVid" autoplay playsinline muted></video>
+        <div class="muted" id="camMsg" style="display:none;padding:26px 10px;text-align:center">
+          Камера недоступна в этом браузере — нажмите «Сделать фото», откроется камера устройства.</div>
+      </div>
+      <input type="file" id="camFile" accept="image/*" capture="environment" hidden>
+      ${allowUpload ? '<input type="file" id="upFile" accept="image/*" hidden>' : ''}
+      <div class="foot">
+        <button class="btn cancel" id="camCancel">Отмена</button>
+        ${allowUpload ? '<button class="btn secondary" id="upBtn">Загрузить файл</button>' : ''}
+        <button class="btn ok" id="camShot">📷 Сделать фото</button>
+      </div></div></div>`);
+    const finish = (val) => {
+      if (done) return; done = true;
+      if (stream) stream.getTracks().forEach((tr) => tr.stop());
+      bg.remove(); resolve(val);
+    };
+    bg.querySelector('.modal-x').onclick = () => finish(null);
+    bg.querySelector('#camCancel').onclick = () => finish(null);
+    bg.addEventListener('click', (e) => { if (e.target === bg) finish(null); });
+    document.body.appendChild(bg);
+    const vid = bg.querySelector('#camVid'), msg = bg.querySelector('#camMsg');
+    const camFile = bg.querySelector('#camFile');
+    let live = false;
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false })
+        .then((s) => { if (done) { s.getTracks().forEach((tr) => tr.stop()); return; } stream = s; vid.srcObject = s; live = true; })
+        .catch(() => { vid.style.display = 'none'; msg.style.display = 'block'; });
+    } else { vid.style.display = 'none'; msg.style.display = 'block'; }
+    bg.querySelector('#camShot').onclick = () => {
+      if (live && vid.videoWidth) {
+        const s = Math.min(1, 1280 / Math.max(vid.videoWidth, vid.videoHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(vid.videoWidth * s); c.height = Math.round(vid.videoHeight * s);
+        c.getContext('2d').drawImage(vid, 0, 0, c.width, c.height);
+        finish(c.toDataURL('image/jpeg', .8));
+      } else camFile.click(); // фолбэк: системная камера через input capture
+    };
+    camFile.onchange = async () => {
+      const f = camFile.files && camFile.files[0]; if (!f) return;
+      finish(await fileToPhoto(f));
+    };
+    const upBtn = bg.querySelector('#upBtn');
+    if (upBtn) {
+      const upFile = bg.querySelector('#upFile');
+      upBtn.onclick = () => upFile.click();
+      upFile.onchange = async () => {
+        const f = upFile.files && upFile.files[0]; if (!f) return;
+        finish(await fileToPhoto(f));
+      };
+    }
+  });
+}
+
+// Открытие смены с обязательным фото (камера) и геолокацией (не блокирует).
+async function openShiftWithChecks(pointId, extra) {
+  const photo = await capturePhoto({ title: 'Фото точки при открытии смены' });
+  if (!photo) { toast('Фото точки обязательно при открытии смены', 'warn'); return null; }
+  const geo = await getGeo();
+  if (!geo) toast('Геолокация недоступна — смена откроется с пометкой «без геолокации»', 'warn');
+  return api('/shifts/open', { method: 'POST', body: { point_id: pointId, ...extra, photo, ...(geo || {}) } });
+}
+
 async function viewMyShift(v) {
   v.innerHTML = topbar('Моя смена');
   bindBell();
@@ -915,7 +1018,10 @@ async function viewMyShift(v) {
         <button class="btn ghost" id="disc">Сменить точку</button>
       </div></div>`;
     $('#disc', v).onclick = async () => { await api(`/points/${mine.id}/disconnect`, { method: 'POST' }); renderShell(); };
-    $('#openCarry', v).onclick = async () => { const d = await api('/shifts/open', { method: 'POST', body: { point_id: mine.id, carryover: true } }); App.state.shiftId = d.shift.id; renderShell(); };
+    $('#openCarry', v).onclick = async () => {
+      try { const d = await openShiftWithChecks(mine.id, { carryover: true }); if (!d) return;
+        App.state.shiftId = d.shift.id; renderShell(); } catch {}
+    };
     $('#openManual', v).onclick = () => openManualShift(mine);
     return;
   }
@@ -1085,8 +1191,9 @@ async function openManualShift(point) {
       wireEnterNav(bg, '.op-open', () => $('#okOpen', bg).focus());
       $('#okOpen', bg).onclick = async () => {
         const opening = [...bg.querySelectorAll('.op-open')].map((i) => ({ sku_id: Number(i.dataset.sku), qty: Number(i.value) || 0 }));
-        const d = await api('/shifts/open', { method: 'POST', body: { point_id: point.id, carryover: false, opening } });
-        closeModal(); App.state.shiftId = d.shift.id; renderShell();
+        closeModal();
+        try { const d = await openShiftWithChecks(point.id, { carryover: false, opening }); if (!d) return;
+          App.state.shiftId = d.shift.id; renderShell(); } catch {}
       };
     });
 }
@@ -1214,14 +1321,32 @@ async function viewArrival(v) {
           </tr>`).join('')}`).join('')}</tbody>
       </table>
     </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-bottom:6px">Фото накладных</h3>
+      <div class="muted" style="margin-bottom:10px">Сфотографируйте или загрузите накладную — фото сохранится вместе с поступлением.</div>
+      <div class="photo-strip" id="arrPhotos"></div>
+      <button class="btn secondary sm" id="arrAddPhoto">📷 Добавить фото накладной</button>
+    </div>
     <div class="row" style="margin-top:18px;justify-content:flex-end"><button class="btn" id="saveArr">Сохранить поступление</button></div>`;
+  const arrPhotos = [];
+  const strip = $('#arrPhotos', v);
+  const drawStrip = () => {
+    strip.innerHTML = arrPhotos.map((p, i) =>
+      `<div class="photo-thumb"><img src="${p}" alt=""><button class="photo-del" data-i="${i}" title="Убрать">✕</button></div>`).join('');
+    strip.querySelectorAll('.photo-del').forEach((b) => b.onclick = () => { arrPhotos.splice(Number(b.dataset.i), 1); drawStrip(); });
+  };
+  $('#arrAddPhoto', v).onclick = async () => {
+    if (arrPhotos.length >= 5) return toast('Не больше 5 фото', 'warn');
+    const p = await capturePhoto({ title: 'Фото накладной', allowUpload: true });
+    if (p) { arrPhotos.push(p); drawStrip(); }
+  };
   $('#saveArr', v).onclick = async () => {
     const items = [...v.querySelectorAll('.arr-input')]
       .map((i) => ({ sku_id: Number(i.dataset.sku), qty: Number(i.value) || 0 }))
       .filter((x) => x.qty > 0);
     if (!items.length) return toast('Укажите количество хотя бы для одного SKU', 'warn');
     try {
-      const r = await api(`/shifts/${mine.shift_id}/income-batch`, { method: 'POST', body: { items } });
+      const r = await api(`/shifts/${mine.shift_id}/income-batch`, { method: 'POST', body: { items, photos: arrPhotos } });
       toast(`Поступление сохранено (${r.applied} поз.)`, 'ok');
       App.route = 'myshift'; renderShell();
     } catch {}
@@ -1270,10 +1395,13 @@ async function viewPointMonitor(v) {
     const moves = await api(`/movements?point_id=${pid}&limit=40`);
     const support = App.user.role === 'BRE' || App.user.role === 'ADMIN';
     v.innerHTML = topbar('Монитор · ' + p.name,
-      `${support && p.shift_id ? `<button class="btn secondary sm" id="fixOpen">Править утренние остатки</button>
+      `${support && p.shift_id ? `<button class="btn sm" id="visitBtn">Визит в точку</button>
+        <button class="btn secondary sm" id="fixOpen">Править утренние остатки</button>
         <button class="btn dark sm" id="supClose">Закрыть смену</button>` : ''}
        ${support && !p.shift_id ? `<button class="btn sm" id="supOpen">Открыть смену (перенос)</button>` : ''}
-       ${p.shift_id ? `<button class="btn back sm" id="detBtn">Смена подробно</button>` : ''}<button class="btn back sm" id="backBtn">Назад</button>`);
+       ${support ? `<button class="btn secondary sm" id="minBtn">Минимумы</button>` : ''}
+       ${p.shift_id ? `<button class="btn secondary sm" id="photosBtn">Фото смены</button>
+        <button class="btn back sm" id="detBtn">Смена подробно</button>` : ''}<button class="btn back sm" id="backBtn">Назад</button>`);
     const body = el('<div class="fade-in"></div>'); v.appendChild(body);
     const t = shift ? shift.totals : null;
     const topSales = shift ? shift.lines.filter((l) => l.sales_qty > 0).sort((a, b) => b.sales_qty - a.sales_qty).slice(0, 10) : [];
@@ -1282,7 +1410,8 @@ async function viewPointMonitor(v) {
       <div class="row between wrap" style="margin-bottom:6px">
         <div>${p.needs_inventory ? '<span class="pill inv">инвентаризация</span>' : statusPill(p.shift_status)}
           ${p.se_connected.length ? '· ' + p.se_connected.map((s) => emp(s.full_name)).join(', ') : '<span class="muted">нет подключённых SE</span>'}</div>
-        <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''} · Саппорт: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}</div>
+        <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''} · Саппорт: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}
+          ${shift ? `<br>Открытие смены: ${geoMark(shift.shift.open_lat, shift.shift.open_lng, p)}` : ''}</div>
       </div>
       <div class="kpis">
         ${kpi('Продажи сегодня', num(p.sales_qty), { icon: 'shopping-bag', tone: 'teal' })}
@@ -1336,8 +1465,176 @@ async function viewPointMonitor(v) {
       }; });
     const fixOpen = $('#fixOpen', v);
     if (fixOpen && shift) fixOpen.onclick = () => openMorningFix(shift, load);
+    const minBtn = $('#minBtn', v);
+    if (minBtn) minBtn.onclick = () => openMinStockModal(p.id, p.name);
+    const photosBtn = $('#photosBtn', v);
+    if (photosBtn) photosBtn.onclick = () => openPhotosModal({ shiftId: p.shift_id, title: `Фото смены — ${p.name}` });
+    const visitBtn = $('#visitBtn', v);
+    if (visitBtn) visitBtn.onclick = () => openVisitModal(p, load);
   };
   App._refresh = load; await load();
+}
+
+// «гео открытия/закрытия»: ссылка на карту + расстояние до точки, либо пометка
+function geoMark(lat, lng, point) {
+  if (lat == null || lng == null) return '<span class="geo-none">без геолокации</span>';
+  let dist = '';
+  if (point && point.lat != null && point.lng != null) {
+    const m = geoDistanceM(lat, lng, point.lat, point.lng);
+    dist = m > 300 ? ` <span class="geo-far" title="Далеко от точки">⚠ ${m >= 1000 ? (m / 1000).toFixed(1) + ' км' : Math.round(m) + ' м'} от точки</span>`
+      : ` <span class="geo-ok">✓ на точке</span>`;
+  }
+  return `<a class="link" href="https://maps.google.com/?q=${lat},${lng}" target="_blank" rel="noopener">геолокация</a>${dist}`;
+}
+function geoDistanceM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, toR = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toR, dLng = (lng2 - lng1) * toR;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toR) * Math.cos(lat2 * toR) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Индивидуальные минимальные остатки точки (админ/саппорт)
+async function openMinStockModal(pointId, pointName) {
+  const rows = await api(`/points/${pointId}/min-stocks`);
+  const groups = groupByCategory(rows.map((r) => ({ ...r, sku_id: r.sku_id })));
+  modal(`<h3>Минимальные остатки — ${esc(pointName)}</h3>
+    <div class="muted" style="margin-bottom:10px">Свой минимум для этой точки. Пустое поле — действует общий минимум SKU (в скобках).</div>
+    <div class="manual-open">${groups.map(([cat, items]) => `
+      <div class="cat-label">${esc(cat)}</div>
+      ${items.map((r) => `<div class="row between manual-row">
+        <span>${esc(r.name)} <span class="muted">(общий: ${num(r.global_min)})</span></span>
+        <input class="qty-input pm-min" data-sku="${r.sku_id}" type="number" min="0"
+               placeholder="${num(r.global_min)}" value="${r.point_min != null ? r.point_min : ''}"></div>`).join('')}
+    `).join('')}</div>
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okMin">Сохранить</button></div>`,
+    (bg) => {
+      wireEnterNav(bg, '.pm-min', () => $('#okMin', bg).focus());
+      $('#okMin', bg).onclick = async () => {
+        const items = [...bg.querySelectorAll('.pm-min')].map((i) => ({
+          sku_id: Number(i.dataset.sku),
+          min_stock: i.value === '' ? null : Number(i.value),
+        }));
+        try {
+          const r = await api(`/points/${pointId}/min-stocks`, { method: 'PUT', body: { items } });
+          closeModal(); toast(`Минимумы сохранены (свои: ${r.set})`, 'ok');
+        } catch {}
+      };
+    });
+}
+
+// Галерея фото (открытие/закрытие смены, накладные, визиты)
+const PHOTO_KIND = { invoice: 'Накладная', shift_open: 'Открытие смены', shift_close: 'Закрытие смены', visit: 'Визит' };
+async function openPhotosModal({ shiftId, visitId, title }) {
+  const q = shiftId ? `shift_id=${shiftId}` : `visit_id=${visitId}`;
+  const rows = await api('/attachments?' + q);
+  modal(`<h3>${esc(title || 'Фото')}</h3>
+    ${rows.length ? `<div class="photo-grid">${rows.map((r) => `
+      <figure class="photo-cell">
+        <img src="${r.data}" alt="" data-zoom>
+        <figcaption>${PHOTO_KIND[r.kind] || r.kind} · ${emp(r.user_name)}<br><span class="muted">${fmtDate(r.created_at)}</span></figcaption>
+      </figure>`).join('')}</div>` : '<div class="empty">Фото пока нет.</div>'}
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Закрыть</button></div>`,
+    (bg) => {
+      bg.querySelectorAll('[data-zoom]').forEach((img) => img.onclick = () => img.classList.toggle('zoomed'));
+    }, 'wide');
+}
+
+// Визит Support Exec: сверка остатков по SKU + отчёт о визите
+async function openVisitModal(p, onDone) {
+  const stock = await api(`/points/${p.id}/stock`);
+  if (!stock.has_shift) return toast('На точке нет открытой смены — сверять нечего', 'warn');
+  let photo = null;
+  const groups = {};
+  for (const r of stock.rows) (groups[r.category || 'Прочее'] = groups[r.category || 'Прочее'] || []).push(r);
+  modal(`<h3>Визит в точку — ${esc(p.name)}</h3>
+    <div class="muted" style="margin-bottom:10px">Пересчитайте товар и внесите фактические остатки. Заполненные позиции попадут в отчёт; расхождения будут подсвечены.</div>
+    <div class="manual-open">${Object.entries(groups).map(([cat, items]) => `
+      <div class="cat-label">${esc(cat)}</div>
+      ${items.map((r) => `<div class="row between manual-row">
+        <span>${esc(r.name)} <span class="muted">(в системе: <b>${num(r.current)}</b>)</span></span>
+        <input class="qty-input vc-act" data-sku="${r.sku_id}" data-sys="${r.current}" type="number" min="0" placeholder="${num(r.current)}"></div>`).join('')}
+    `).join('')}</div>
+    <div style="margin-top:12px"><label class="muted" style="display:block;margin-bottom:6px">Комментарий к визиту</label>
+      <textarea id="vNotes" rows="3" style="width:100%" placeholder="Что проверили, что заметили…"></textarea></div>
+    <div class="row" style="margin-top:10px;gap:10px;align-items:center">
+      <button class="btn secondary sm" id="vPhoto">📷 Фото точки</button><span class="muted" id="vPhotoState">фото не добавлено</span>
+    </div>
+    <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okVisit">Отправить отчёт</button></div>`,
+    (bg) => {
+      $('#vPhoto', bg).onclick = async () => {
+        const ph = await capturePhoto({ title: 'Фото точки при визите' });
+        if (ph) { photo = ph; $('#vPhotoState', bg).textContent = 'фото добавлено ✓'; }
+      };
+      $('#okVisit', bg).onclick = async () => {
+        const checks = [...bg.querySelectorAll('.vc-act')]
+          .filter((i) => i.value !== '')
+          .map((i) => ({ sku_id: Number(i.dataset.sku), actual_qty: Number(i.value) }));
+        if (!checks.length) return toast('Внесите фактический остаток хотя бы по одному SKU', 'warn');
+        const notes = $('#vNotes', bg).value.trim();
+        closeModal();
+        const geo = await getGeo();
+        if (!geo) toast('Геолокация недоступна — визит с пометкой «без геолокации»', 'warn');
+        try {
+          const r = await api('/visits', { method: 'POST', body: { point_id: p.id, notes, photo, checks, ...(geo || {}) } });
+          toast(r.mismatches ? `Отчёт отправлен. Расхождения: ${r.mismatches}` : 'Отчёт отправлен — расхождений нет', r.mismatches ? 'warn' : 'ok');
+          if (onDone) onDone();
+        } catch {}
+      };
+    });
+}
+
+// ---- Визиты в точки (BRE/ADMIN): список отчётов о визитах ----
+async function viewVisits(v) {
+  v.innerHTML = topbar('Визиты в точки', '', 'отчёты Support Exec о визитах и сверке остатков');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const load = async () => {
+    const rows = await api('/visits');
+    body.innerHTML = `
+      <div class="kpis">
+        ${kpi('Всего визитов', rows.length, { icon: 'map-pinned', tone: 'teal' })}
+        ${kpi('С расхождениями', rows.filter((r) => r.mismatches > 0).length, { icon: 'alert-triangle', tone: rows.some((r) => r.mismatches > 0) ? 'warn' : 'ok' })}
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Дата</th><th>Точка</th><th>Support Exec</th><th class="num">Сверено SKU</th><th class="num">Расхождения</th><th>Гео</th><th>Фото</th><th>Комментарий</th></tr></thead>
+        <tbody>${rows.length ? rows.map((r) => `<tr class="click" data-vid="${r.id}">
+          <td>${fmtDate(r.created_at)}</td><td><b>${esc(r.point_name)}</b></td><td>${emp(r.bre_name)}</td>
+          <td class="num">${r.checked}</td>
+          <td class="num">${r.mismatches ? `<span class="pill inv">${r.mismatches}</span>` : '<span class="geo-ok">✓ 0</span>'}</td>
+          <td>${r.lat != null ? `<a class="link" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" rel="noopener">карта</a>` : '<span class="geo-none">нет</span>'}</td>
+          <td>${r.photos ? '📷 ' + r.photos : '—'}</td>
+          <td class="muted">${esc((r.notes || '').slice(0, 60))}${(r.notes || '').length > 60 ? '…' : ''}</td>
+        </tr>`).join('') : '<tr><td colspan="8" class="empty">Визитов пока нет. Отчёт заполняется из монитора точки — кнопка «Визит в точку».</td></tr>'}</tbody>
+      </table></div>`;
+    if (window.lucide) lucide.createIcons();
+    body.querySelectorAll('[data-vid]').forEach((tr) => tr.onclick = () => openVisitDetail(Number(tr.dataset.vid)));
+  };
+  App._refresh = load; await load();
+}
+
+async function openVisitDetail(id) {
+  const d = await api('/visits/' + id);
+  modal(`<h3>Визит — ${esc(d.point_name)}</h3>
+    <div class="muted" style="margin-bottom:12px">${emp(d.bre_name)} · ${fmtDate(d.created_at)}
+      · ${d.lat != null ? `<a class="link" href="https://maps.google.com/?q=${d.lat},${d.lng}" target="_blank" rel="noopener">геолокация</a>` : '<span class="geo-none">без геолокации</span>'}</div>
+    ${d.notes ? `<div class="card" style="margin-bottom:12px;background:var(--surface-2);box-shadow:none">${esc(d.notes)}</div>` : ''}
+    <div class="table-wrap"><table class="shift-table">
+      <thead><tr><th>SKU</th><th class="num">В системе</th><th class="num">Фактически</th><th>Статус</th></tr></thead>
+      <tbody>${d.checks.map((c) => `<tr class="${c.confirmed ? '' : 'crit-row'}">
+        <td><b>${esc(c.sku_name)}</b><div class="muted" style="font-size:12px">${esc(c.category || '')}</div></td>
+        <td class="num">${num(c.system_qty)}</td>
+        <td class="num"><b>${num(c.actual_qty)}</b></td>
+        <td>${c.confirmed ? '<span class="geo-ok">✓ подтверждено</span>' : `<span class="geo-far">⚠ расхождение ${c.actual_qty - c.system_qty > 0 ? '+' : ''}${num(c.actual_qty - c.system_qty)}</span>`}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div class="foot">
+      ${d.photos ? '<button class="btn secondary" id="vdPhotos">Фото визита</button>' : ''}
+      <button class="btn cancel" onclick="closeModal()">Закрыть</button>
+    </div>`,
+    (bg) => {
+      const b = $('#vdPhotos', bg);
+      if (b) b.onclick = () => { closeModal(); openPhotosModal({ visitId: d.id, title: `Фото визита — ${d.point_name}` }); };
+    }, 'wide');
 }
 
 // ---- Закуп (BRE/ADMIN) — расчёт закупки по всем точкам ----
@@ -1735,7 +2032,8 @@ async function viewShift(v) {
     const canEdit = isOpen; // поддержка (BRE) тоже может править — сервер проверяет зону ответственности
     const t = d.totals;
     v.innerHTML = topbar(d.shift.point_name + ' · смена #' + d.shift.id,
-      `<button class="btn secondary sm" id="xlsBtn">Экспорт в Excel</button>
+      `<button class="btn secondary sm" id="shPhotos">Фото</button>
+       <button class="btn secondary sm" id="xlsBtn">Экспорт в Excel</button>
        ${canEdit ? `<button class="btn secondary sm" id="invBtn">Инвентаризация</button>` : ''}
        ${canEdit ? `<button class="btn dark sm" id="closeBtn">Закрыть смену</button>` : ''}
        <button class="btn back sm" id="backBtn">Назад</button>`);
@@ -1743,8 +2041,8 @@ async function viewShift(v) {
     body.innerHTML = `
       <div class="row between wrap" style="margin-bottom:8px">
         <div>${statusPill(d.shift.status)} ${d.shift.needs_inventory ? '<span class="pill inv">Требуется инвентаризация</span>' : ''}</div>
-        <div class="muted">Открыта: ${fmtDate(d.shift.opened_at)} · ${emp(d.shift.opened_by_name)}
-          ${d.shift.status === 'closed' ? `<br>Закрыта: ${fmtDate(d.shift.closed_at)} · ${emp(d.shift.closed_by_name)}` : ''}</div>
+        <div class="muted">Открыта: ${fmtDate(d.shift.opened_at)} · ${emp(d.shift.opened_by_name)} · ${geoMark(d.shift.open_lat, d.shift.open_lng)}
+          ${d.shift.status === 'closed' ? `<br>Закрыта: ${fmtDate(d.shift.closed_at)} · ${emp(d.shift.closed_by_name)} · ${geoMark(d.shift.close_lat, d.shift.close_lng)}` : ''}</div>
       </div>
       <div class="kpis">
         ${kpi('Текущий остаток', num(t.current))}
@@ -1783,6 +2081,8 @@ async function viewShift(v) {
     if (backBtn) backBtn.onclick = () => { App.route = App.user.role === 'SE' ? (App.state.shiftFrom || 'shifthistory') : (App.state.shiftFrom || 'shifts'); App.state.shiftFrom = null; renderShell(); };
     const xlsBtn = $('#xlsBtn', v);
     if (xlsBtn) xlsBtn.onclick = () => window.open(`/api/shifts/${d.shift.id}/export.xlsx`, '_blank');
+    const shPhotos = $('#shPhotos', v);
+    if (shPhotos) shPhotos.onclick = () => openPhotosModal({ shiftId: d.shift.id, title: `Фото — смена #${d.shift.id}` });
     if (canEdit) {
       const closeBtn = $('#closeBtn', v); if (closeBtn) closeBtn.onclick = () => confirmClose(d);
       const invBtn = $('#invBtn', v); if (invBtn) invBtn.onclick = () => doInventory(d);
@@ -1839,9 +2139,14 @@ function confirmClose(d) {
     </div>
     <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okClose">Подтвердить закрытие</button></div>`,
     (bg) => { $('#okClose', bg).onclick = async () => {
+      closeModal();
+      const photo = await capturePhoto({ title: 'Фото точки при закрытии смены' });
+      if (!photo) return toast('Фото точки обязательно при закрытии смены', 'warn');
+      const geo = await getGeo();
+      if (!geo) toast('Геолокация недоступна — закрытие с пометкой «без геолокации»', 'warn');
       try {
-        const closed = await api(`/shifts/${d.shift.id}/close`, { method: 'POST' });
-        closeModal(); toast('Смена закрыта', 'ok');
+        const closed = await api(`/shifts/${d.shift.id}/close`, { method: 'POST', body: { photo, ...(geo || {}) } });
+        toast('Смена закрыта', 'ok');
         showDayReport(closed);
       } catch {}
     }; });

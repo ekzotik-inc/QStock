@@ -11,15 +11,23 @@ function recordMovement({ pointId, shiftId, skuId, type, qty, balanceAfter, user
   ).run(pointId, shiftId, skuId, type, qty, balanceAfter, userId);
 }
 
+// Эффективный минимальный остаток: индивидуальный по точке, иначе глобальный по SKU.
+function effMinStock(pointId, skuId, fallback) {
+  const row = db.prepare('SELECT min_stock FROM point_sku_min WHERE point_id=? AND sku_id=?').get(pointId, skuId);
+  return row ? row.min_stock : fallback;
+}
+
 // Check a single SKU on a point for low stock; notify BRE once it crosses threshold.
 function checkLowStock(pointId, skuId, balanceAfter) {
   const sku = db.prepare('SELECT * FROM skus WHERE id = ?').get(skuId);
-  if (!sku || !sku.min_stock || sku.min_stock <= 0) return;
-  if (balanceAfter > sku.min_stock) return;
+  if (!sku) return;
+  const min = effMinStock(pointId, skuId, sku.min_stock);
+  if (!min || min <= 0) return;
+  if (balanceAfter > min) return;
   const point = db.prepare('SELECT * FROM points WHERE id = ?').get(pointId);
   const payload = {
     point_id: pointId, point_name: point.name, sku_id: skuId, sku_name: sku.name,
-    current: balanceAfter, min_stock: sku.min_stock, at: new Date().toISOString(),
+    current: balanceAfter, min_stock: min, at: new Date().toISOString(),
   };
   if (point.bre_id) {
     notify(point.bre_id, 'low_stock', payload);
@@ -46,4 +54,4 @@ function emitStockLine(pointId, shiftId, skuId) {
   });
 }
 
-module.exports = { recordMovement, checkLowStock, emitStockLine, currentStock, audit, notify };
+module.exports = { recordMovement, checkLowStock, emitStockLine, currentStock, audit, notify, effMinStock };

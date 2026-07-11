@@ -29,7 +29,10 @@ function pointSummary(pointId) {
     ).get(shift.id);
     salesQty = sale.q; salesValue = sale.v;
     const stocks = db.prepare(
-      `SELECT ss.*, s.price, s.min_stock, s.name FROM shift_stock ss JOIN skus s ON s.id = ss.sku_id WHERE ss.shift_id = ?`
+      `SELECT ss.*, s.price, COALESCE(psm.min_stock, s.min_stock) AS min_stock, s.name
+       FROM shift_stock ss JOIN skus s ON s.id = ss.sku_id
+       LEFT JOIN point_sku_min psm ON psm.sku_id = s.id AND psm.point_id = ${pointId}
+       WHERE ss.shift_id = ?`
     ).all(shift.id);
     for (const row of stocks) {
       const cur = currentStock(row);
@@ -170,8 +173,11 @@ router.get('/:id/stock', authRequired, (req, res) => {
   const rows = [];
   let belowMin = 0, critical = 0, totalValue = 0;
   if (shift) {
-    const lines = db.prepare(`SELECT ss.*, sk.name, sk.category, sk.min_stock, sk.price
-      FROM shift_stock ss JOIN skus sk ON sk.id=ss.sku_id WHERE ss.shift_id=? AND sk.active=1`).all(shift.id);
+    const lines = db.prepare(`SELECT ss.*, sk.name, sk.category, sk.price,
+        COALESCE(psm.min_stock, sk.min_stock) AS min_stock
+      FROM shift_stock ss JOIN skus sk ON sk.id=ss.sku_id
+      LEFT JOIN point_sku_min psm ON psm.sku_id = sk.id AND psm.point_id = ${id}
+      WHERE ss.shift_id=? AND sk.active=1`).all(shift.id);
     for (const l of lines) {
       const cur = currentStock(l);
       const min = l.min_stock || 0;
@@ -185,6 +191,57 @@ router.get('/:id/stock', authRequired, (req, res) => {
   }
   res.json({ point_id: id, point_name: point.name, has_shift: !!shift,
     summary: { total: rows.length, below_min: belowMin, critical, value: totalValue }, rows });
+});
+
+// --- Индивидуальные минимальные остатки точки ---
+function canEditPointMin(user, pointId) {
+  return user.role === 'ADMIN' || (user.role === 'BRE' && canSeePoint(user, pointId));
+}
+
+// All active SKUs with global min + point override (null when none)
+router.get('/:id/min-stocks', authRequired, (req, res) => {
+  const id = Number(req.params.id);
+  if (req.user.role !== 'SE' && !canSeePoint(req.user, id)) {
+    return res.status(403).json({ error: 'Нет доступа к точке' });
+  }
+  const rows = db.prepare(
+    `SELECT s.id AS sku_id, s.name, s.category, s.min_stock AS global_min, psm.min_stock AS point_min
+     FROM skus s LEFT JOIN point_sku_min psm ON psm.sku_id = s.id AND psm.point_id = ?
+     WHERE s.active = 1 ORDER BY s.category, s.name`
+  ).all(id);
+  res.json(rows);
+});
+
+// Set overrides. body: { items: [{ sku_id, min_stock }] } — min_stock null/'' removes override.
+router.put('/:id/min-stocks', authRequired, (req, res) => {
+  const id = Number(req.params.id);
+  if (!canEditPointMin(req.user, id)) return res.status(403).json({ error: 'Нет доступа' });
+  const p = db.prepare('SELECT id FROM points WHERE id = ?').get(id);
+  if (!p) return res.status(404).json({ error: 'Не найдено' });
+  const items = (req.body && req.body.items) || [];
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'Неверный формат' });
+  const up = db.prepare(
+    `INSERT INTO point_sku_min (point_id, sku_id, min_stock) VALUES (?, ?, ?)
+     ON CONFLICT(point_id, sku_id) DO UPDATE SET min_stock = excluded.min_stock`
+  );
+  const del = db.prepare('DELETE FROM point_sku_min WHERE point_id = ? AND sku_id = ?');
+  let set = 0, removed = 0;
+  const tx = db.transaction(() => {
+    for (const it of items) {
+      const skuId = Number(it.sku_id);
+      if (!skuId) continue;
+      const v = it.min_stock;
+      if (v == null || v === '') { removed += del.run(id, skuId).changes; continue; }
+      const n = Number(v);
+      if (!isFinite(n) || n < 0) continue;
+      up.run(id, skuId, n); set++;
+    }
+  });
+  tx();
+  audit({ userId: req.user.id, action: 'point_min_update', entity: 'point',
+    newValue: { point_id: id, set, removed }, ip: req.ip });
+  rt.emitPoint(id, 'point:changed', { pointId: id });
+  res.json({ ok: true, set, removed });
 });
 
 module.exports = { router, pointSummary };

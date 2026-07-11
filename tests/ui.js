@@ -18,10 +18,31 @@ async function loginAs(page, login, password) {
   await page.waitForSelector('.shell', { timeout: 5000 });
 }
 
+// Проходит модалку камеры (обязательное фото при открытии/закрытии смены)
+async function passCamera(page, id) {
+  try {
+    await page.waitForSelector('#camShot', { timeout: 4000 });
+    await page.waitForTimeout(700); // даём фейковой камере запуститься
+    await page.click('#camShot');
+    await page.waitForTimeout(600);
+    if (id) check(id, !(await page.isVisible('#camShot')), 'camera modal completes');
+    return true;
+  } catch {
+    if (id) check(id, false, 'camera modal did not appear');
+    return false;
+  }
+}
+
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const browser = await chromium.launch({
+    executablePath: '/opt/pw-browsers/chromium',
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+  });
   const errors = [];
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext({
+    permissions: ['camera', 'geolocation'],
+    geolocation: { latitude: 41.311, longitude: 69.28 },
+  });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push('SE pageerror: ' + e.message + (e.stack ? '\n    ' + e.stack.split('\n').slice(0, 3).join('\n    ') : '')));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('SE console: ' + m.text()); });
@@ -50,10 +71,12 @@ async function loginAs(page, login, password) {
       await page.waitForSelector('.modal', { timeout: 3000 });
       const ins = await page.$$('.op-open'); for (let i = 0; i < ins.length; i++) await ins[i].fill('100');
       await page.click('#okOpen');
-      await page.waitForTimeout(800);
+      await passCamera(page, 'UI-SE-OPEN-CAMERA');
+      await page.waitForTimeout(900);
     } else if (await page.isVisible('#openCarry')) {
       await page.click('#openCarry');
-      await page.waitForTimeout(800);
+      await passCamera(page, 'UI-SE-OPEN-CAMERA');
+      await page.waitForTimeout(900);
     }
 
     const boardVisible = await page.isVisible('.se-shift tbody tr');
@@ -86,6 +109,9 @@ async function loginAs(page, login, password) {
       const brePage = await (await browser.newContext()).newPage();
       await loginAs(brePage, 'bre', 'bre123');
       check('UI-SUP-DASH', await brePage.isVisible('.kpis'), 'support low-stock dashboard renders');
+      check('UI-SUP-VISITS-NAV', await brePage.isVisible('.nav a[data-route="visits"]'), 'visits section in support nav');
+      await brePage.click('.nav a[data-route="visits"]'); await brePage.waitForTimeout(600);
+      check('UI-SUP-VISITS-VIEW', await brePage.isVisible('.table-wrap'), 'visits list renders');
       await brePage.close();
 
       // Новое поступление adds income shown as green +N on Моя смена
@@ -100,7 +126,8 @@ async function loginAs(page, login, password) {
         await page.waitForSelector('.modal', { timeout: 3000 });
         check('UI-SE-CLOSE-SUMMARY', await page.isVisible('#okClose'), 'close summary modal shows');
         await page.click('#okClose');
-        await page.waitForTimeout(800);
+        await passCamera(page, 'UI-SE-CLOSE-CAMERA');
+        await page.waitForTimeout(900);
         check('UI-SE-DAY-REPORT', await page.isVisible('#okReport'), 'daily report shows after close');
         if (await page.isVisible('#okReport')) await page.click('#okReport');
         await page.waitForTimeout(400);

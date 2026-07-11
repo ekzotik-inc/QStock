@@ -17,11 +17,13 @@ const { router: shiftsRoutes } = require('./routes/shifts');
 const { router: inventoryRoutes } = require('./routes/inventory');
 const analyticsRoutes = require('./routes/analytics');
 const notesRoutes = require('./routes/notes');
+const { router: attachmentsRoutes } = require('./routes/attachments');
+const { router: visitsRoutes } = require('./routes/visits');
 const miscRoutes = require('./routes/misc');
 
 const app = express();
 app.set('trust proxy', true);
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' })); // фото накладных/смен приходят data-URL
 app.use(cookieParser());
 
 // --- health / build info (no auth) — for deploy diagnostics ---
@@ -49,6 +51,8 @@ app.use('/api/shifts', authRequired, shiftsRoutes);
 app.use('/api/inventory', authRequired, inventoryRoutes);
 app.use('/api/analytics', authRequired, analyticsRoutes);
 app.use('/api/notes', authRequired, notesRoutes);
+app.use('/api/attachments', authRequired, attachmentsRoutes);
+app.use('/api/visits', authRequired, visitsRoutes);
 app.use('/api', authRequired, miscRoutes);
 
 // --- static frontend ---

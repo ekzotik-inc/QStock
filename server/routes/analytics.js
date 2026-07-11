@@ -181,11 +181,13 @@ function pointRow(pid, from, to) {
 function computeLowStock(ids) {
   const ph = scopePlaceholders(ids);
   const rows = db.prepare(
-    `SELECT ss.sku_id, sk.name sku_name, sk.min_stock, sh.point_id, p.name point_name,
+    `SELECT ss.sku_id, sk.name sku_name, COALESCE(psm.min_stock, sk.min_stock) AS min_stock,
+            sh.point_id, p.name point_name,
             (ss.opening + ss.income - ss.sales_qty - ss.writeoff) current
      FROM shift_stock ss JOIN shifts sh ON sh.id=ss.shift_id JOIN skus sk ON sk.id=ss.sku_id
      JOIN points p ON p.id=sh.point_id
-     WHERE sh.status='open' AND sh.point_id IN (${ph}) AND sk.min_stock > 0`
+     LEFT JOIN point_sku_min psm ON psm.sku_id = sk.id AND psm.point_id = sh.point_id
+     WHERE sh.status='open' AND sh.point_id IN (${ph}) AND COALESCE(psm.min_stock, sk.min_stock) > 0`
   ).all(...ids);
   return rows.filter((r) => r.current <= r.min_stock);
 }

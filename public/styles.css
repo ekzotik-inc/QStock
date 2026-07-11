@@ -713,3 +713,25 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
   .bottom-nav button svg, .bottom-nav button i { width: 21px; height: 21px; }
   .main { padding-bottom: 76px; }
 }
+
+/* --- BR-доработки: камера, фото, гео, визиты --- */
+.cam-modal .cam-box { border-radius: 14px; overflow: hidden; background: #0b1416;
+  border: 1px solid var(--line); min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.cam-modal video { width: 100%; max-height: 52vh; display: block; }
+.photo-strip { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.photo-thumb { position: relative; width: 92px; height: 92px; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--line); }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-del { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: none;
+  border-radius: 50%; background: rgba(10, 22, 24, .72); color: #fff; cursor: pointer; font-size: 11px; line-height: 1; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;
+  max-height: 60vh; overflow: auto; padding: 2px; }
+.photo-cell { margin: 0; }
+.photo-cell img { width: 100%; border-radius: 12px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
+.photo-cell img.zoomed { position: fixed; inset: 4vh 4vw; width: auto; height: auto;
+  max-width: 92vw; max-height: 92vh; margin: auto; z-index: 200; cursor: zoom-out;
+  object-fit: contain; background: rgba(10, 22, 24, .92); border-radius: 14px; }
+.photo-cell figcaption { font-size: 12px; color: var(--ink-soft); margin-top: 6px; line-height: 1.5; }
+.geo-none { color: var(--warn); font-weight: 700; }
+.geo-ok { color: var(--ok, #1a9c6b); font-weight: 700; }
+.geo-far { color: var(--danger); font-weight: 700; }

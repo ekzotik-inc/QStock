@@ -186,6 +186,48 @@ CREATE TABLE IF NOT EXISTS notes (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Фото-доказательства: накладные при поступлении, точка при открытии/закрытии смены
+CREATE TABLE IF NOT EXISTS attachments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL CHECK(kind IN ('invoice','shift_open','shift_close','visit')),
+  point_id   INTEGER REFERENCES points(id),
+  shift_id   INTEGER REFERENCES shifts(id),
+  visit_id   INTEGER,
+  user_id    INTEGER REFERENCES users(id),
+  data       TEXT NOT NULL,                 -- data-URL (клиент сжимает до ~1280px JPEG)
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_shift ON attachments(shift_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_point ON attachments(point_id, created_at);
+
+-- Индивидуальные минимальные остатки по точке (переопределяют skus.min_stock)
+CREATE TABLE IF NOT EXISTS point_sku_min (
+  point_id  INTEGER NOT NULL REFERENCES points(id) ON DELETE CASCADE,
+  sku_id    INTEGER NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+  min_stock REAL NOT NULL,
+  PRIMARY KEY (point_id, sku_id)
+);
+
+-- Визиты Support Exec: сверка остатков на месте + отчёт
+CREATE TABLE IF NOT EXISTS visits (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  point_id     INTEGER NOT NULL REFERENCES points(id),
+  bre_id       INTEGER NOT NULL REFERENCES users(id),
+  lat          REAL,
+  lng          REAL,
+  notes        TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS visit_checks (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  visit_id   INTEGER NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  sku_id     INTEGER NOT NULL REFERENCES skus(id),
+  system_qty REAL NOT NULL,
+  actual_qty REAL NOT NULL,
+  confirmed  INTEGER NOT NULL DEFAULT 0     -- 1 = совпало / подтверждено
+);
+CREATE INDEX IF NOT EXISTS idx_visits_point ON visits(point_id, created_at);
+
 CREATE TABLE IF NOT EXISTS sku_categories (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE,
@@ -209,6 +251,11 @@ addColumn('users', 'phone', 'TEXT');
 addColumn('users', 'avatar_color', 'TEXT');    // hex color for the initials avatar; null = auto from name
 addColumn('users', 'avatar', 'TEXT');          // small data-URL photo (client resizes to ≤256px)
 addColumn('shifts', 'closed_by_other', 'INTEGER NOT NULL DEFAULT 0'); // 1 = closed_by != opened_by (flagged for review)
+// BR-доработки: геолокация открытия/закрытия смены (контроль присутствия на точке)
+addColumn('shifts', 'open_lat', 'REAL');
+addColumn('shifts', 'open_lng', 'REAL');
+addColumn('shifts', 'close_lat', 'REAL');
+addColumn('shifts', 'close_lng', 'REAL');
 // SPV (supervisor over several BRE) is not yet a login role — stored as free text on the point.
 addColumn('points', 'spv_name', 'TEXT');
 addColumn('points', 'spv_phone', 'TEXT');

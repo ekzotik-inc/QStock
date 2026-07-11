@@ -168,8 +168,11 @@ router.get('/lowstock', authRequired, (req, res) => {
     const rows = [];
     let value = 0;
     if (shift) {
-      const lines = db.prepare(`SELECT ss.*, sk.name, sk.category, sk.min_stock, sk.price
-        FROM shift_stock ss JOIN skus sk ON sk.id=ss.sku_id WHERE ss.shift_id=? AND sk.active=1`).all(shift.id);
+      const lines = db.prepare(`SELECT ss.*, sk.name, sk.category, sk.price,
+          COALESCE(psm.min_stock, sk.min_stock) AS min_stock
+        FROM shift_stock ss JOIN skus sk ON sk.id=ss.sku_id
+        LEFT JOIN point_sku_min psm ON psm.sku_id = sk.id AND psm.point_id = ${pid}
+        WHERE ss.shift_id=? AND sk.active=1`).all(shift.id);
       for (const l of lines) {
         const cur = currentStock(l);
         value += cur * (l.price || 0);
