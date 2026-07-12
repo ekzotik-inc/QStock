@@ -137,3 +137,10 @@ rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 
 Overall average: **60-90% token reduction** on common development operations.
 <!-- /rtk-instructions -->
+
+# База знаний проекта (обязательно)
+
+Единый источник правды — `docs/PROJECT.md` (скил `project-knowledge`).
+Правила: читать перед любыми изменениями; перед каждым коммитом/PR обновлять
+разделы и дописывать строку в «Журнал изменений» тем же коммитом. Не пушить
+код без записи в журнал.

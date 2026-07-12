@@ -357,7 +357,15 @@ async function loadNotifications() {
     renderBell();
     const unread = App.notifications.filter((n) => !n.is_read);
     const cnt = (types) => unread.filter((n) => types.includes(n.type)).length || '';
-    App.state.navBadges = {};
+    // бейдж «Визиты в точки»: непрочитанные расхождения по визитам (получает админ)
+    App.state.navBadges = { visits: cnt(['visit_mismatch']) };
+    document.querySelectorAll('.nav a[data-route]').forEach((a) => {
+      const val = App.state.navBadges[a.dataset.route];
+      const ex = a.querySelector('.nav-badge');
+      if (ex && !val) ex.remove();
+      else if (ex) ex.textContent = val;
+      else if (val) a.insertAdjacentHTML('beforeend', `<span class="nav-badge">${val}</span>`);
+    });
   } catch {}
 }
 function bellHtml() {
@@ -1598,9 +1606,17 @@ async function viewVisits(v) {
     'отчёты Support Exec о визитах и сверке остатков');
   bindBell();
   const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const points = await api('/points').catch(() => []);
   const load = async () => {
-    const rows = await api('/visits');
+    const fp = App.state.visitsPoint || '';
+    const rows = await api('/visits' + (fp ? `?point_id=${fp}` : ''));
     body.innerHTML = `
+      <div class="filters" style="margin-bottom:14px">
+        <div class="field"><label>Точка</label><select id="vFilter">
+          <option value="">Все точки</option>
+          ${points.map((p) => `<option value="${p.id}" ${String(p.id) === String(fp) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+        </select></div>
+      </div>
       <div class="kpis">
         ${kpi('Всего визитов', rows.length, { icon: 'map-pinned', tone: 'teal' })}
         ${kpi('С расхождениями', rows.filter((r) => r.mismatches > 0).length, { icon: 'alert-triangle', tone: rows.some((r) => r.mismatches > 0) ? 'warn' : 'ok' })}
@@ -1618,6 +1634,7 @@ async function viewVisits(v) {
       </table></div>`;
     if (window.lucide) lucide.createIcons();
     body.querySelectorAll('[data-vid]').forEach((tr) => tr.onclick = () => openVisitDetail(Number(tr.dataset.vid)));
+    $('#vFilter', body).onchange = (e) => { App.state.visitsPoint = e.target.value; load(); };
   };
   $('#newVisit', v).onclick = async () => {
     const pts = (await api('/points')).filter((p) => p.shift_status === 'open');

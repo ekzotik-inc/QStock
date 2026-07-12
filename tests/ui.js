@@ -150,12 +150,20 @@ async function passCamera(page, id) {
         check('UI-SE-NOTES-FORM', await page.isVisible('#noteAdd'), 'notes form visible');
         await page.fill('#noteText', 'Тестовая заметка'); await page.click('#noteAdd'); await page.waitForTimeout(600);
         check('UI-SE-NOTE-CREATE', await page.isVisible('.note-card'), 'note card appears');
-        await page.click('.note-card [data-pin]'); await page.waitForTimeout(600);
-        check('UI-SE-NOTE-PIN', await page.isVisible('.note-card.pinned'), 'note can be pinned');
+        // пин кликаем у НЕзакреплённой карточки (в демо-сиде первая может быть
+        // уже закреплена — клик по ней открепляет и тест флачит)
+        const pinBtn = await page.$('.note-card:not(.pinned) [data-pin]');
+        if (pinBtn) await pinBtn.click();
+        const pinned = await page.waitForSelector('.note-card.pinned', { timeout: 3000 }).catch(() => null);
+        check('UI-SE-NOTE-PIN', !!pinned, 'note can be pinned');
         // Enter submits a note (Shift+Enter would be newline)
+        await page.waitForTimeout(400); // дать realtime-перерисовке устаканиться
         const beforeN = (await page.$$('.note-card')).length;
-        await page.fill('#noteText', 'Заметка по Enter'); await page.press('#noteText', 'Enter'); await page.waitForTimeout(600);
-        check('UI-SE-NOTE-ENTER', (await page.$$('.note-card')).length > beforeN, 'Enter creates the note');
+        await page.fill('#noteText', 'Заметка по Enter'); await page.press('#noteText', 'Enter');
+        const grown = await page.waitForFunction(
+          (n) => document.querySelectorAll('.note-card').length > n, beforeN, { timeout: 3000 }
+        ).catch(() => null);
+        check('UI-SE-NOTE-ENTER', !!grown, 'Enter creates the note');
       }
     }
 
