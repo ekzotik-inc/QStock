@@ -8,7 +8,8 @@ const router = express.Router();
 
 // Store a photo (client-compressed data-URL). Returns id or null when data invalid.
 function saveAttachment({ kind, pointId = null, shiftId = null, visitId = null, userId = null, data }) {
-  if (typeof data !== 'string' || !data.startsWith('data:image/')) return null;
+  // только растровые форматы: SVG как data-URL — вектор XSS
+  if (typeof data !== 'string' || !/^data:image\/(jpeg|jpg|png|webp);base64,/.test(data)) return null;
   if (data.length > 4 * 1024 * 1024) return null; // ~3MB binary after base64
   const info = db.prepare(
     `INSERT INTO attachments (kind, point_id, shift_id, visit_id, user_id, data)

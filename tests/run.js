@@ -110,14 +110,14 @@ async function login(login, password) {
   check('SHF-01', open.status === 200 && open.data.shift.status === 'open', 'open manual');
   const sid = open.data.shift.id;
   check('SHF-03', (await req('POST', '/api/shifts/open', se, { point_id: pid })).status === 409, 'no double open');
-  check('SHF-04', (await req('POST', `/api/shifts/${sid}/opening`, se, { sku_id: skuA, qty: 120 })).status === 200, 'set opening');
-  const sale = await req('POST', `/api/shifts/${sid}/op`, se, { sku_id: skuA, type: 'sale', qty: 10 });
+  check('SHF-04', (await req('POST', `/api/shifts/${sid}/opening`, bre, { sku_id: skuA, qty: 120 })).status === 200, 'set opening (support)');
+  const sale = await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'sale', qty: 10 });
   check('SHF-05', sale.status === 200 && sale.data.current === 110, `sale current ${sale.data.current}`);
-  const inc = await req('POST', `/api/shifts/${sid}/op`, se, { sku_id: skuA, type: 'income', qty: 5 });
+  const inc = await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'income', qty: 5 });
   check('SHF-06', inc.data.current === 115, `income current ${inc.data.current}`);
-  const wo = await req('POST', `/api/shifts/${sid}/op`, se, { sku_id: skuA, type: 'writeoff', qty: 5 });
+  const wo = await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'writeoff', qty: 5 });
   check('SHF-07', wo.data.current === 110, `writeoff current ${wo.data.current}`);
-  const adj = await req('POST', `/api/shifts/${sid}/op`, se, { sku_id: skuA, type: 'adjustment', qty: 200 });
+  const adj = await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'adjustment', qty: 200 });
   check('SHF-08', adj.data.current === 200, `adjust to ${adj.data.current}`);
   // SHF-09 verify formula via detail
   const detail = await req('GET', `/api/shifts/${sid}`, se);
@@ -149,7 +149,7 @@ async function login(login, password) {
   console.log('== SHIFT CLOSE / ADMIN ==');
   const close = await req('POST', `/api/shifts/${sid}/close`, se);
   check('SHF-10', close.status === 200 && close.data.shift.status === 'closed', 'close shift');
-  check('SHF-11', (await req('POST', `/api/shifts/${sid}/op`, se, { sku_id: skuA, type: 'sale', qty: 1 })).status === 400, 'closed read-only');
+  check('SHF-11', (await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'sale', qty: 1 })).status === 400, 'closed read-only');
   check('SHF-17', !(await req('GET', '/api/points', admin)).data.find((p) => p.id === pid).se_connected.length, 'closing shift releases all connected SE');
   check('SHF-02', await testCarryover(se, pid, skuA), 'carryover opening from prev close');
   // ensure point is free, then open a fresh shift so a conflict exists
@@ -286,6 +286,46 @@ async function login(login, password) {
     check('BR-20', visNoShift.status === 409, 'visit requires open shift');
   }
 
+  console.log('== ANTIFRAUD ==');
+  {
+    const PHOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==';
+    // точка свободна, se подключается и открывает вручную с заниженным утром
+    const pf = (await req('GET', '/api/points', admin)).data.find((x) => x.id === pid);
+    if (pf.shift_id) await req('POST', `/api/shifts/${pf.shift_id}/force-close`, admin);
+    await req('POST', '/api/notifications/read', bre, {});
+    await req('POST', `/api/points/${pid}/connect`, se);
+    const oF = await req('POST', '/api/shifts/open', se, {
+      point_id: pid, carryover: false, opening: [{ sku_id: skuA, qty: 1 }],
+    });
+    const sidF = oF.data.shift.id;
+    // SE не может: править утро, поштучные операции, произвольные списания
+    check('FRD-01', (await req('POST', `/api/shifts/${sidF}/opening`, se, { sku_id: skuA, qty: 999 })).status === 403, 'SE cannot rewrite morning stock');
+    check('FRD-02', (await req('POST', `/api/shifts/${sidF}/op`, se, { sku_id: skuA, type: 'adjustment', qty: 999 })).status === 403, 'SE cannot adjust stock');
+    check('FRD-03', (await req('POST', `/api/shifts/${sidF}/set-writeoff`, se, { sku_id: skuA, qty: 50 })).status === 403, 'SE cannot set writeoff');
+    // расхождение ручного утра с закрытием прошлой смены — сигнал саппорту
+    await new Promise((r) => setTimeout(r, 150));
+    const nBre = (await req('GET', '/api/notifications', bre)).data;
+    check('FRD-04', nBre.some((n) => n.type === 'opening_mismatch'), 'opening mismatch notifies support');
+    // уменьшение «продано» SE — сигнал саппорту
+    await req('POST', `/api/shifts/${sidF}/set-sales`, se, { sku_id: skuB, qty: 10 });
+    await req('POST', `/api/shifts/${sidF}/set-sales`, se, { sku_id: skuB, qty: 4 });
+    await new Promise((r) => setTimeout(r, 150));
+    const nBre2 = (await req('GET', '/api/notifications', bre)).data;
+    check('FRD-05', nBre2.some((n) => n.type === 'sales_decrease'), 'sales decrease notifies support');
+    // SVG-фото отклоняется (XSS-вектор), растровое — принимается
+    const svgOpen = await req('POST', `/api/shifts/${sidF}/income-batch`, se,
+      { items: [{ sku_id: skuA, qty: 1 }], photos: ['data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='] });
+    const attF = (await req('GET', `/api/attachments?shift_id=${sidF}`, bre)).data;
+    check('FRD-06', svgOpen.status === 200 && !attF.some((a) => String(a.data).includes('svg')), 'SVG photo rejected');
+    await req('POST', `/api/shifts/${sidF}/force-close`, admin);
+    // антибрутфорс: 8 неудач по одному логину → 429
+    const brute = 'brute_' + Date.now();
+    await req('POST', '/api/users', admin, { full_name: 'Brute', login: brute, password: 'realpass', role: 'SE' });
+    let last = null;
+    for (let i = 0; i < 9; i++) last = await login(brute, 'wrong-' + i);
+    check('FRD-07', last.status === 429, `login rate-limited (${last.status})`);
+  }
+
   // UX stories are frontend; mark as code-present (served)
   const html = await (await fetch(BASE + '/')).text();
   check('UX-01', html.includes('app.js'), 'SPA served');
@@ -319,7 +359,7 @@ async function login(login, password) {
     const lowSku = (await req('POST', '/api/skus', adminTok, { name: 'LowSKU', article: a, price: 100, min_stock: 10 })).data;
     await req('POST', `/api/points/${pointId}/connect`, seTok);
     const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: false, opening: [{ sku_id: lowSku.id, qty: 12 }] });
-    await req('POST', `/api/shifts/${o.data.shift.id}/op`, seTok, { sku_id: lowSku.id, type: 'sale', qty: 5 }); // 12-5=7 <=10
+    await req('POST', `/api/shifts/${o.data.shift.id}/set-sales`, seTok, { sku_id: lowSku.id, qty: 5 }); // 12-5=7 <=10
     await new Promise((r) => setTimeout(r, 200));
     const notifs = (await req('GET', '/api/notifications', breTok)).data;
     await req('POST', `/api/shifts/${o.data.shift.id}/force-close`, adminTok);
@@ -352,7 +392,7 @@ async function login(login, password) {
       monSock.on('connect', () => monSock.emit('watch:point', pointId));
       monSock.on('stock:update', () => { out.monitor = true; });
       setTimeout(async () => {
-        await req('POST', `/api/shifts/${sid2}/op`, seTok, { sku_id: skuId, type: 'sale', qty: 1 });
+        await req('POST', `/api/shifts/${sid2}/set-sales`, seTok, { sku_id: skuId, qty: 1 });
       }, 400);
       setTimeout(() => { finish(); finish(); }, 1800);
     });

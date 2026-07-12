@@ -104,7 +104,7 @@ function connectSocket() {
   App.socket.on('notification', (n) => {
     App.notifications.unshift({ id: Date.now(), type: n.type, payload: n.payload, is_read: 0, created_at: new Date().toISOString() });
     renderBell();
-    toast(notifText(n.type, n.payload), n.type.includes('low') || n.type.includes('overdue') || n.type.includes('mismatch') ? 'warn' : '');
+    toast(notifText(n.type, n.payload), n.type.includes('low') || n.type.includes('overdue') || n.type.includes('mismatch') || n.type.includes('decrease') ? 'warn' : '');
   });
   ['stock:update', 'sale:new', 'shift:changed', 'point:changed', 'sku:changed', 'notes:changed'].forEach((ev) => {
     App.socket.on(ev, (data) => handleRealtime(ev, data));
@@ -447,6 +447,8 @@ function notifText(type, p = {}) {
     case 'inventory_assigned': return `Назначена инвентаризация на точке #${p.point_id}`;
     case 'inventory_done': return `Инвентаризация на «${p.point_name || ''}» завершена (${p.by || ''}): позиций ${p.items}, расхождений ${p.diffs}`;
     case 'visit_mismatch': return `Визит на «${p.point_name || ''}» (${p.bre_name || ''}): расхождений по остаткам — ${p.mismatches}`;
+    case 'opening_mismatch': return `«${p.point_name || ''}»: утренний остаток при открытии не совпал с закрытием прошлой смены (позиций: ${p.count}) — ${p.by || ''}`;
+    case 'sales_decrease': return `«${p.point_name || ''}»: ${p.by || ''} уменьшил «продано» по ${p.sku_name || ''} с ${num(p.from)} до ${num(p.to)}`;
     default: return type;
   }
 }
@@ -1406,7 +1408,8 @@ async function viewPointMonitor(v) {
         <div>${p.needs_inventory ? '<span class="pill inv">инвентаризация</span>' : statusPill(p.shift_status)}
           ${p.se_connected.length ? '· ' + p.se_connected.map((s) => emp(s.full_name)).join(', ') : '<span class="muted">нет подключённых SE</span>'}</div>
         <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''} · Саппорт: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}
-          ${shift ? `<br>Открытие смены: ${geoMark(shift.shift.open_lat, shift.shift.open_lng, p)}` : ''}</div>
+          ${shift ? `<br>Открытие смены: ${geoMark(shift.shift.open_lat, shift.shift.open_lng, p)}
+            ${!(shift.photos && shift.photos.shift_open) ? ' · <span class="geo-none">нет фото открытия</span>' : ''}` : ''}</div>
       </div>
       ${support ? `<div class="sup-tools">
         <span class="sup-tools-label">Действия саппорта:</span>

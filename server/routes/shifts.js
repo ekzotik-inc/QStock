@@ -2,7 +2,7 @@
 const express = require('express');
 const db = require('../db');
 const { authRequired, requireRole } = require('../auth');
-const { audit, currentStock, today } = require('../util');
+const { audit, currentStock, today, notify } = require('../util');
 const { canSeePoint, seConnected } = require('../access');
 const { recordMovement, checkLowStock, emitStockLine } = require('../stock');
 const { sendXlsx } = require('../xlsx');
@@ -168,12 +168,42 @@ router.post('/open', authRequired, (req, res) => {
   audit({ userId: req.user.id, action: 'shift_open', entity: 'shift',
     newValue: { shift_id: shiftId, point_id: pid, carryover: !!carryover,
       handover_inventory: !!handover, geo: numOrNull(lat) != null }, ip: req.ip });
+  // Антифрод: ручное утро сверяем с закрытием прошлой смены — расхождение
+  // (например, занижение остатка) уходит саппорту точки и в аудит.
+  if (!carryover && prev) {
+    const prevRows = db.prepare('SELECT * FROM shift_stock WHERE shift_id = ?').all(prev.id);
+    const prevClose = {};
+    for (const r of prevRows) prevClose[r.sku_id] = currentStock(r);
+    const entered = {};
+    for (const o of (Array.isArray(opening) ? opening : [])) entered[Number(o.sku_id)] = Number(o.qty) || 0;
+    // сравниваем по ВСЕМ SKU прошлой смены: непереданный SKU открывается нулём,
+    // и «забыть» позицию — тоже способ занизить остаток
+    const diffs = [];
+    const allIds = new Set([...Object.keys(prevClose), ...Object.keys(entered)].map(Number));
+    for (const skuId of allIds) {
+      const was = prevClose[skuId] || 0;
+      const now = entered[skuId] || 0;
+      if (now !== was) diffs.push({ sku_id: skuId, prev_close: was, opened_with: now });
+    }
+    if (diffs.length) {
+      audit({ userId: req.user.id, action: 'opening_mismatch', entity: 'shift',
+        newValue: { shift_id: shiftId, point_id: pid, diffs: diffs.slice(0, 50) }, ip: req.ip });
+      const payload = { shift_id: shiftId, point_id: pid, point_name: point.name,
+        by: req.user.full_name, count: diffs.length };
+      if (point.bre_id) {
+        notify(point.bre_id, 'opening_mismatch', payload);
+        rt.emitUser(point.bre_id, 'notification', { type: 'opening_mismatch', payload });
+      }
+    }
+  }
   rt.emitPoint(pid, 'shift:changed', { pointId: pid, shiftId, status: 'open' });
   res.json(shiftDetail(shiftId));
 });
 
-// set / overwrite opening for a single sku (morning stock)
-router.post('/:id/opening', authRequired, (req, res) => {
+// set / overwrite opening for a single sku (morning stock).
+// Антифрод: только саппорт/админ — SE меняет утро лишь при открытии смены
+// или через инвентаризацию (иначе можно «подгонять» остаток под недостачу).
+router.post('/:id/opening', authRequired, requireRole('BRE', 'ADMIN'), (req, res) => {
   const shiftId = Number(req.params.id);
   const shift = guardOpenWritable(req, res, shiftId);
   if (!shift) return;
@@ -191,7 +221,10 @@ router.post('/:id/opening', authRequired, (req, res) => {
 
 // generic operation: income / writeoff / sale / adjustment
 // body: { sku_id, type, qty, price? }
-router.post('/:id/op', authRequired, (req, res) => {
+// Антифрод: только саппорт/админ. SE вносит продажи через set-sales,
+// приход — через income-batch; произвольные корректировки/списания SE
+// позволяли бы скрывать недостачу.
+router.post('/:id/op', authRequired, requireRole('BRE', 'ADMIN'), (req, res) => {
   const shiftId = Number(req.params.id);
   const shift = guardOpenWritable(req, res, shiftId);
   if (!shift) return;
@@ -268,6 +301,17 @@ router.post('/:id/set-sales', authRequired, (req, res) => {
   recordMovement({ pointId: shift.point_id, shiftId, skuId, type: 'sale', qty: delta, balanceAfter: balance, userId: req.user.id });
   audit({ userId: req.user.id, action: 'op_sale', entity: 'shift_stock',
     newValue: { shift_id: shiftId, sku_id: skuId, total_sold: qty, delta, balance }, ip: req.ip });
+  // Антифрод: уменьшение итога «продано» (внёс 10, позже поправил на 5) —
+  // легальная опечатка, но и способ забрать выручку; саппорт получает сигнал.
+  if (delta < 0 && req.user.role === 'SE') {
+    const point = db.prepare('SELECT id, name, bre_id FROM points WHERE id = ?').get(shift.point_id);
+    if (point && point.bre_id) {
+      const payload = { shift_id: shiftId, point_id: point.id, point_name: point.name,
+        sku_name: sku.name, from: row.sales_qty, to: qty, by: req.user.full_name };
+      notify(point.bre_id, 'sales_decrease', payload);
+      rt.emitUser(point.bre_id, 'notification', { type: 'sales_decrease', payload });
+    }
+  }
   emitStockLine(shift.point_id, shiftId, skuId);
   rt.emitPoint(shift.point_id, 'sale:new', { pointId: shift.point_id, shiftId, skuId, qty: delta, value: delta * sku.price });
   checkLowStock(shift.point_id, skuId, balance);
@@ -276,7 +320,8 @@ router.post('/:id/set-sales', authRequired, (req, res) => {
 
 // SET total writeoff (списание/порча) for a SKU during the shift.
 // body: { sku_id, qty } — qty is the new cumulative writeoff total.
-router.post('/:id/set-writeoff', authRequired, (req, res) => {
+// Антифрод: только саппорт/админ (SE мог бы списанием прятать проданное).
+router.post('/:id/set-writeoff', authRequired, requireRole('BRE', 'ADMIN'), (req, res) => {
   const shiftId = Number(req.params.id);
   const shift = guardOpenWritable(req, res, shiftId);
   if (!shift) return;

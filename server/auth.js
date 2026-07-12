@@ -15,20 +15,39 @@ function sign(user) {
   return jwt.sign({ id: user.id, role: user.role, login: user.login }, SECRET, { expiresIn: TOKEN_TTL });
 }
 
+// Антибрутфорс: не более MAX_FAILS неудачных попыток на пару login+IP за окно.
+const FAIL_WINDOW_MS = 10 * 60 * 1000, MAX_FAILS = 8;
+const loginFails = new Map(); // key -> [timestamps]
+function failsFor(key) {
+  const now = Date.now();
+  const arr = (loginFails.get(key) || []).filter((t) => now - t < FAIL_WINDOW_MS);
+  loginFails.set(key, arr);
+  if (loginFails.size > 10000) loginFails.clear(); // защита памяти
+  return arr;
+}
+
 function login(req, res) {
   let { login: lg, password } = req.body || {};
   // trim: copy-paste and autofill often add stray spaces
   lg = String(lg || '').trim();
   password = String(password || '').trim();
   if (!lg || !password) return res.status(400).json({ error: 'Логин и пароль обязательны' });
+  const rlKey = lg.toLowerCase() + '|' + (req.ip || '');
+  if (failsFor(rlKey).length >= MAX_FAILS) {
+    audit({ userId: null, action: 'login_ratelimited', entity: 'user', newValue: { login: lg }, ip: req.ip });
+    return res.status(429).json({ error: 'Слишком много попыток входа. Подождите 10 минут.' });
+  }
   const user = db.prepare('SELECT * FROM users WHERE login = ? COLLATE NOCASE').get(lg);
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    loginFails.set(rlKey, failsFor(rlKey).concat(Date.now()));
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   }
   if (user.status !== 'active') return res.status(403).json({ error: 'Учетная запись заблокирована' });
+  loginFails.delete(rlKey);
   const token = sign(user);
   audit({ userId: user.id, action: 'login', entity: 'user', newValue: { login: lg }, ip: req.ip });
-  res.cookie('qstoken', token, { httpOnly: true, sameSite: 'lax', maxAge: 12 * 3600 * 1000 });
+  res.cookie('qstoken', token, { httpOnly: true, sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production', maxAge: 12 * 3600 * 1000 });
   res.json({ token, user: publicUser(user) });
 }
 
