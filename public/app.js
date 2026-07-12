@@ -208,6 +208,7 @@ function navGroups() {
       ['shifts', 'Смены', 'clock'],
     ]},
     { h: 'Контроль', items: [
+      ['shiftcontrol', 'Контроль смен', 'camera'],
       ['visits', 'Визиты в точки', 'map-pinned'],
       ['invhistory', 'Инвентаризации', 'clipboard-check'],
       ['schedules', 'График инвентаризаций', 'calendar-days'],
@@ -225,6 +226,7 @@ function navGroups() {
     { h: 'Операции', items: [
       ['points', 'Торговые точки', 'map-pin'],
       ['shifts', 'Смены', 'clock'],
+      ['shiftcontrol', 'Контроль смен', 'camera'],
       ['visits', 'Визиты в точки', 'map-pinned'],
       ['invhistory', 'Инвентаризации', 'clipboard-check'],
     ]},
@@ -467,6 +469,7 @@ function renderRoute() {
     myshift: viewMyShift, arrival: viewArrival, sestock: viewSeStock,
     notes: viewNotes, shifthistory: viewShiftHistory,
     pointmon: viewPointMonitor, procurement: viewProcurement, visits: viewVisits,
+    shiftcontrol: viewShiftControl,
     // inventory history
     seinv: viewInvHistory, invhistory: viewInvHistory,
     profile: viewProfile,
@@ -1532,8 +1535,8 @@ async function openMinStockModal(pointId, pointName) {
 
 // Галерея фото (открытие/закрытие смены, накладные, визиты)
 const PHOTO_KIND = { invoice: 'Накладная', shift_open: 'Открытие смены', shift_close: 'Закрытие смены', visit: 'Визит' };
-async function openPhotosModal({ shiftId, visitId, title }) {
-  const q = shiftId ? `shift_id=${shiftId}` : `visit_id=${visitId}`;
+async function openPhotosModal({ shiftId, visitId, kind, title }) {
+  const q = (shiftId ? `shift_id=${shiftId}` : `visit_id=${visitId}`) + (kind ? `&kind=${kind}` : '');
   const rows = await api('/attachments?' + q);
   modal(`<h3>${esc(title || 'Фото')}</h3>
     ${rows.length ? `<div class="photo-grid">${rows.map((r) => `
@@ -1589,6 +1592,64 @@ async function openVisitModal(p, onDone) {
         } catch {}
       };
     });
+}
+
+// ---- Контроль смен (BRE/ADMIN): гео и фото открытия/закрытия ----
+async function viewShiftControl(v) {
+  v.innerHTML = topbar('Контроль смен', '', 'где открывались и закрывались смены + фото с точек');
+  bindBell();
+  const body = el('<div class="fade-in"></div>'); v.appendChild(body);
+  const points = await api('/points').catch(() => []);
+  const load = async () => {
+    const q = new URLSearchParams();
+    if (App.state.scPoint) q.set('point_id', App.state.scPoint);
+    if (App.state.scDate) q.set('date', App.state.scDate);
+    const rows = await api('/shifts?' + q.toString());
+    const geoCell = (lat, lng, r) => geoMark(lat, lng, { lat: r.point_lat, lng: r.point_lng });
+    const photoBtn = (r, kind, count) => count
+      ? `<button class="btn ghost sm" data-ph="${r.id}" data-kind="${kind}">📷 ${count}</button>`
+      : '<span class="geo-none">нет фото</span>';
+    const noGeo = rows.filter((r) => r.open_lat == null).length;
+    const noPhoto = rows.filter((r) => !r.photos_open).length;
+    body.innerHTML = `
+      <div class="filters" style="margin-bottom:14px">
+        <div class="field"><label>Точка</label><select id="scPoint">
+          <option value="">Все точки</option>
+          ${points.map((p) => `<option value="${p.id}" ${String(p.id) === String(App.state.scPoint || '') ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Дата</label><input id="scDate" type="date" value="${App.state.scDate || ''}"></div>
+      </div>
+      <div class="kpis">
+        ${kpi('Смен в списке', rows.length, { icon: 'clock', tone: 'teal' })}
+        ${kpi('Без геолокации', noGeo, { icon: 'map-pin-off', tone: noGeo ? 'warn' : 'ok' })}
+        ${kpi('Без фото открытия', noPhoto, { icon: 'camera-off', tone: noPhoto ? 'warn' : 'ok' })}
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Дата</th><th>Точка</th>
+          <th>Открытие</th><th>Гео открытия</th><th>Фото</th>
+          <th>Закрытие</th><th>Гео закрытия</th><th>Фото</th><th></th></tr></thead>
+        <tbody>${rows.length ? rows.map((r) => `<tr>
+          <td>${r.business_date}${r.status === 'open' ? ' <span class="pill open">открыта</span>' : ''}</td>
+          <td><b>${esc(r.point_name)}</b></td>
+          <td>${emp(r.opened_by_name)}<div class="muted" style="font-size:12px">${fmtDate(r.opened_at)}</div></td>
+          <td>${geoCell(r.open_lat, r.open_lng, r)}</td>
+          <td>${photoBtn(r, 'shift_open', r.photos_open)}</td>
+          <td>${r.closed_by_name ? `${emp(r.closed_by_name)}<div class="muted" style="font-size:12px">${fmtDate(r.closed_at)}</div>` : '<span class="muted">—</span>'}</td>
+          <td>${r.status === 'closed' ? geoCell(r.close_lat, r.close_lng, r) : '<span class="muted">—</span>'}</td>
+          <td>${r.status === 'closed' ? photoBtn(r, 'shift_close', r.photos_close) : '<span class="muted">—</span>'}</td>
+          <td><button class="btn ghost sm" data-shift="${r.id}">Смена</button></td>
+        </tr>`).join('') : '<tr><td colspan="9" class="empty">Смен не найдено.</td></tr>'}</tbody>
+      </table></div>`;
+    if (window.lucide) lucide.createIcons();
+    $('#scPoint', body).onchange = (e) => { App.state.scPoint = e.target.value; load(); };
+    $('#scDate', body).onchange = (e) => { App.state.scDate = e.target.value; load(); };
+    body.querySelectorAll('[data-ph]').forEach((b) => b.onclick = () => openPhotosModal({
+      shiftId: Number(b.dataset.ph), kind: b.dataset.kind,
+      title: `${b.dataset.kind === 'shift_open' ? 'Фото открытия' : 'Фото закрытия'} — смена #${b.dataset.ph}`,
+    }));
+    body.querySelectorAll('[data-shift]').forEach((b) => b.onclick = () => { App.state.shiftFrom = 'shiftcontrol'; openShift(Number(b.dataset.shift)); });
+  };
+  App._refresh = load; await load();
 }
 
 // ---- Визиты в точки (BRE/ADMIN): список отчётов о визитах ----

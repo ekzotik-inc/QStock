@@ -72,8 +72,10 @@ function shiftDetail(shiftId) {
 // list shifts (filtered by visibility)
 router.get('/', authRequired, (req, res) => {
   const { point_id, status, date } = req.query;
-  let sql = `SELECT sh.*, p.name AS point_name, p.bre_id,
-                    ob.full_name AS opened_by_name, cb.full_name AS closed_by_name
+  let sql = `SELECT sh.*, p.name AS point_name, p.bre_id, p.lat AS point_lat, p.lng AS point_lng,
+                    ob.full_name AS opened_by_name, cb.full_name AS closed_by_name,
+                    (SELECT COUNT(*) FROM attachments a WHERE a.shift_id = sh.id AND a.kind = 'shift_open') AS photos_open,
+                    (SELECT COUNT(*) FROM attachments a WHERE a.shift_id = sh.id AND a.kind = 'shift_close') AS photos_close
              FROM shifts sh JOIN points p ON p.id = sh.point_id
              LEFT JOIN users ob ON ob.id = sh.opened_by
              LEFT JOIN users cb ON cb.id = sh.closed_by WHERE 1=1`;

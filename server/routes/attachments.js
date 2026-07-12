@@ -20,7 +20,7 @@ function saveAttachment({ kind, pointId = null, shiftId = null, visitId = null, 
 
 // List attachments (metadata + data) for a shift / point / visit.
 router.get('/', authRequired, (req, res) => {
-  const { shift_id, point_id, visit_id } = req.query;
+  const { shift_id, point_id, visit_id, kind } = req.query;
   let sql = `SELECT a.id, a.kind, a.point_id, a.shift_id, a.visit_id, a.user_id, a.created_at,
                     u.full_name AS user_name, a.data
              FROM attachments a LEFT JOIN users u ON u.id = a.user_id WHERE 1=1`;
@@ -29,6 +29,7 @@ router.get('/', authRequired, (req, res) => {
   if (visit_id) { sql += ' AND a.visit_id = ?'; args.push(Number(visit_id)); }
   if (point_id) { sql += ' AND a.point_id = ?'; args.push(Number(point_id)); }
   if (!shift_id && !visit_id && !point_id) return res.status(400).json({ error: 'Укажите смену, точку или визит' });
+  if (kind) { sql += ' AND a.kind = ?'; args.push(String(kind)); }
   sql += ' ORDER BY a.id DESC LIMIT 100';
   const rows = db.prepare(sql).all(...args);
   // role scoping: every row must belong to a point the user can see

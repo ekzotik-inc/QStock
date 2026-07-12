@@ -112,6 +112,8 @@ async function passCamera(page, id) {
       check('UI-SUP-VISITS-NAV', await brePage.isVisible('.nav a[data-route="visits"]'), 'visits section in support nav');
       await brePage.click('.nav a[data-route="visits"]'); await brePage.waitForTimeout(600);
       check('UI-SUP-VISITS-VIEW', await brePage.isVisible('.table-wrap'), 'visits list renders');
+      await brePage.click('.nav a[data-route="shiftcontrol"]'); await brePage.waitForTimeout(700);
+      check('UI-SUP-SHIFTCONTROL', await brePage.isVisible('.table-wrap') && (await brePage.innerText('h2')).includes('Контроль смен'), 'shift control view renders');
       await brePage.close();
 
       // Новое поступление adds income shown as green +N on Моя смена

@@ -237,6 +237,13 @@ async function login(login, password) {
     // geo + photo on close
     const cl1 = await req('POST', `/api/shifts/${o1.data.shift.id}/close`, se, { lat: 41.32, lng: 69.29, photo: PHOTO });
     check('BR-06', cl1.status === 200 && cl1.data.shift.close_lat === 41.32 && cl1.data.photos.shift_close === 1, 'close saves geo+photo');
+    // список смен отдаёт гео и счётчики фото (для вкладки «Контроль смен»)
+    const scList = await req('GET', `/api/shifts?point_id=${pid}`, bre);
+    const scRow = scList.data.find((s) => s.id === o1.data.shift.id);
+    check('BR-21', scRow && scRow.photos_open === 1 && scRow.photos_close === 1 && scRow.open_lat === 41.31,
+      `shift list exposes geo+photo counts (open:${scRow && scRow.photos_open}, close:${scRow && scRow.photos_close})`);
+    const attKind = await req('GET', `/api/attachments?shift_id=${o1.data.shift.id}&kind=shift_close`, bre);
+    check('BR-22', attKind.status === 200 && attKind.data.length === 1 && attKind.data[0].kind === 'shift_close', 'attachments kind filter');
     // пересменка: same SE reopens -> no inventory required
     await req('POST', `/api/points/${pid}/connect`, se);
     const o2 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: true });
