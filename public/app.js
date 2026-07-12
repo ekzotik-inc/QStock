@@ -104,7 +104,7 @@ function connectSocket() {
   App.socket.on('notification', (n) => {
     App.notifications.unshift({ id: Date.now(), type: n.type, payload: n.payload, is_read: 0, created_at: new Date().toISOString() });
     renderBell();
-    toast(notifText(n.type, n.payload), n.type.includes('low') || n.type.includes('overdue') ? 'warn' : '');
+    toast(notifText(n.type, n.payload), n.type.includes('low') || n.type.includes('overdue') || n.type.includes('mismatch') ? 'warn' : '');
   });
   ['stock:update', 'sale:new', 'shift:changed', 'point:changed', 'sku:changed', 'notes:changed'].forEach((ev) => {
     App.socket.on(ev, (data) => handleRealtime(ev, data));
@@ -439,6 +439,7 @@ function notifText(type, p = {}) {
     case 'shift_overdue': return `Не закрыта смена на «${p.point_name || ''}» (${p.business_date || ''})`;
     case 'inventory_assigned': return `Назначена инвентаризация на точке #${p.point_id}`;
     case 'inventory_done': return `Инвентаризация на «${p.point_name || ''}» завершена (${p.by || ''}): позиций ${p.items}, расхождений ${p.diffs}`;
+    case 'visit_mismatch': return `Визит на «${p.point_name || ''}» (${p.bre_name || ''}): расхождений по остаткам — ${p.mismatches}`;
     default: return type;
   }
 }
@@ -1057,10 +1058,10 @@ async function viewMyShift(v) {
           <div><span class="muted">Остаток вечером</span><b id="stCurrent" class="kpi-link" data-stock-point="${mine.id}" data-stock-name="${esc(mine.name)}">${num(t.current)}</b></div>
         </div>
         <button class="inv-btn ${needInv ? 'armed' : ''}" id="invBtn" ${needInv ? '' : 'disabled'}
-          title="${needInv ? 'Инвентаризация назначена — проведите её' : 'Кнопка станет активной, когда саппорт или администратор назначит инвентаризацию'}">
+          title="${needInv ? 'Требуется инвентаризация — проведите её' : 'Кнопка станет активной при назначении инвентаризации или при пересменке'}">
           <i data-lucide="clipboard-check"></i>Инвентаризация</button>
       </div>
-      ${needInv ? '<div class="card banner-warn">Назначена инвентаризация. Закрытие смены недоступно, пока она не проведена.</div>' : ''}
+      ${needInv ? '<div class="card banner-warn">Требуется инвентаризация (назначена саппортом или обязательная при пересменке). Закрытие смены недоступно, пока она не проведена.</div>' : ''}
       <div class="row between wrap" style="margin:18px 0 0;gap:10px">
         ${tabCats.length ? `<div class="se-tabs">
           <button class="se-tab ${!activeTab ? 'on' : ''}" data-setab="">Основные</button>
@@ -2140,12 +2141,17 @@ function confirmClose(d) {
     <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button><button class="btn ok" id="okClose">Подтвердить закрытие</button></div>`,
     (bg) => { $('#okClose', bg).onclick = async () => {
       closeModal();
-      const photo = await capturePhoto({ title: 'Фото точки при закрытии смены' });
-      if (!photo) return toast('Фото точки обязательно при закрытии смены', 'warn');
+      // фото с камеры обязательно только для SE на точке; саппорт/админ закрывают
+      // удалённо (техпомощь) — их закрытие логируется как closed_by_other
+      let photo = null;
+      if (App.user.role === 'SE') {
+        photo = await capturePhoto({ title: 'Фото точки при закрытии смены' });
+        if (!photo) return toast('Фото точки обязательно при закрытии смены', 'warn');
+      }
       const geo = await getGeo();
-      if (!geo) toast('Геолокация недоступна — закрытие с пометкой «без геолокации»', 'warn');
+      if (!geo && App.user.role === 'SE') toast('Геолокация недоступна — закрытие с пометкой «без геолокации»', 'warn');
       try {
-        const closed = await api(`/shifts/${d.shift.id}/close`, { method: 'POST', body: { photo, ...(geo || {}) } });
+        const closed = await api(`/shifts/${d.shift.id}/close`, { method: 'POST', body: { ...(photo ? { photo } : {}), ...(geo || {}) } });
         toast('Смена закрыта', 'ok');
         showDayReport(closed);
       } catch {}

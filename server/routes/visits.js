@@ -2,7 +2,7 @@
 const express = require('express');
 const db = require('../db');
 const { authRequired, requireRole } = require('../auth');
-const { audit, currentStock } = require('../util');
+const { audit, currentStock, notify } = require('../util');
 const { canSeePoint, visiblePointIds } = require('../access');
 const { saveAttachment } = require('./attachments');
 const rt = require('../realtime');
@@ -71,6 +71,15 @@ router.post('/', authRequired, requireRole('BRE', 'ADMIN'), (req, res) => {
   }
   audit({ userId: req.user.id, action: 'visit_report', entity: 'visit',
     newValue: { visit_id: visitId, point_id: pid, checked: detail.checked, mismatches: detail.mismatches }, ip: req.ip });
+  // расхождения по визиту — сигнал для администраторов
+  if (detail.mismatches > 0) {
+    const payload = { visit_id: visitId, point_id: pid, point_name: point.name,
+      bre_name: detail.bre_name, mismatches: detail.mismatches };
+    for (const a of db.prepare(`SELECT id FROM users WHERE role='ADMIN' AND status='active'`).all()) {
+      notify(a.id, 'visit_mismatch', payload);
+      rt.emitUser(a.id, 'notification', { type: 'visit_mismatch', payload });
+    }
+  }
   rt.emitPoint(pid, 'point:changed', { pointId: pid });
   res.json(detail);
 });
