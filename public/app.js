@@ -1395,14 +1395,12 @@ async function viewPointMonitor(v) {
     const shift = p.shift_id ? await api('/shifts/' + p.shift_id) : null;
     const moves = await api(`/movements?point_id=${pid}&limit=40`);
     const support = App.user.role === 'BRE' || App.user.role === 'ADMIN';
+    // шапка — только главное действие и «Назад»; остальные действия саппорта
+    // собраны в панель внутри страницы (иначе на телефоне 7 кнопок столбиком)
     v.innerHTML = topbar('Монитор · ' + p.name,
-      `${support && p.shift_id ? `<button class="btn sm" id="visitBtn">Визит в точку</button>
-        <button class="btn secondary sm" id="fixOpen">Править утренние остатки</button>
-        <button class="btn dark sm" id="supClose">Закрыть смену</button>` : ''}
+      `${support && p.shift_id ? `<button class="btn sm" id="visitBtn">Визит в точку</button>` : ''}
        ${support && !p.shift_id ? `<button class="btn sm" id="supOpen">Открыть смену (перенос)</button>` : ''}
-       ${support ? `<button class="btn secondary sm" id="minBtn">Минимумы</button>` : ''}
-       ${p.shift_id ? `<button class="btn secondary sm" id="photosBtn">Фото смены</button>
-        <button class="btn back sm" id="detBtn">Смена подробно</button>` : ''}<button class="btn back sm" id="backBtn">Назад</button>`);
+       <button class="btn back sm" id="backBtn">Назад</button>`);
     const body = el('<div class="fade-in"></div>'); v.appendChild(body);
     const t = shift ? shift.totals : null;
     const topSales = shift ? shift.lines.filter((l) => l.sales_qty > 0).sort((a, b) => b.sales_qty - a.sales_qty).slice(0, 10) : [];
@@ -1414,6 +1412,16 @@ async function viewPointMonitor(v) {
         <div class="muted">${esc(p.address || '')}${p.phone ? ` · ☎ ${esc(p.phone)}` : ''}${p.lat != null ? ` · <a class="link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank" rel="noopener">на карте</a>` : ''} · Саппорт: ${emp(p.bre_name)}${p.spv_name ? ` · СПВ: ${emp(p.spv_name)}` : ''} · обновлено ${fmtDate(p.last_update)}
           ${shift ? `<br>Открытие смены: ${geoMark(shift.shift.open_lat, shift.shift.open_lng, p)}` : ''}</div>
       </div>
+      ${support ? `<div class="sup-tools">
+        <span class="sup-tools-label">Действия саппорта:</span>
+        ${p.shift_id ? `
+          <button class="btn secondary sm" id="fixOpen">Править утренние остатки</button>
+          <button class="btn secondary sm" id="minBtn">Минимумы точки</button>
+          <button class="btn secondary sm" id="photosBtn">Фото смены</button>
+          <button class="btn secondary sm" id="detBtn">Смена подробно</button>
+          <button class="btn dark sm" id="supClose">Закрыть смену</button>`
+        : `<button class="btn secondary sm" id="minBtn">Минимумы точки</button>`}
+      </div>` : ''}
       <div class="kpis">
         ${kpi('Продажи сегодня', num(p.sales_qty), { icon: 'shopping-bag', tone: 'teal' })}
         ${kpi('Сумма продаж', money(p.sales_value), { accent: true, icon: 'wallet', tone: 'teal' })}
@@ -1586,7 +1594,8 @@ async function openVisitModal(p, onDone) {
 
 // ---- Визиты в точки (BRE/ADMIN): список отчётов о визитах ----
 async function viewVisits(v) {
-  v.innerHTML = topbar('Визиты в точки', '', 'отчёты Support Exec о визитах и сверке остатков');
+  v.innerHTML = topbar('Визиты в точки', '<button class="btn sm" id="newVisit">Новый визит</button>',
+    'отчёты Support Exec о визитах и сверке остатков');
   bindBell();
   const body = el('<div class="fade-in"></div>'); v.appendChild(body);
   const load = async () => {
@@ -1609,6 +1618,20 @@ async function viewVisits(v) {
       </table></div>`;
     if (window.lucide) lucide.createIcons();
     body.querySelectorAll('[data-vid]').forEach((tr) => tr.onclick = () => openVisitDetail(Number(tr.dataset.vid)));
+  };
+  $('#newVisit', v).onclick = async () => {
+    const pts = (await api('/points')).filter((p) => p.shift_status === 'open');
+    if (!pts.length) return toast('Нет точек с открытой сменой — визит возможен только в работающую точку', 'warn');
+    if (pts.length === 1) return openVisitModal(pts[0], load);
+    modal(`<h3>Новый визит — выберите точку</h3>
+      <div class="manual-open">${pts.map((p) => `<div class="row between manual-row">
+        <span><b>${esc(p.name)}</b> <span class="muted">${esc(p.address || '')}</span></span>
+        <button class="btn sm" data-vp="${p.id}">Выбрать</button></div>`).join('')}</div>
+      <div class="foot"><button class="btn cancel" onclick="closeModal()">Отмена</button></div>`,
+      (bg) => bg.querySelectorAll('[data-vp]').forEach((b) => b.onclick = () => {
+        const p = pts.find((x) => x.id === Number(b.dataset.vp));
+        closeModal(); openVisitModal(p, load);
+      }));
   };
   App._refresh = load; await load();
 }

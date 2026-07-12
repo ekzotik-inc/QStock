@@ -735,3 +735,8 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
 .geo-none { color: var(--warn); font-weight: 700; }
 .geo-ok { color: var(--ok, #1a9c6b); font-weight: 700; }
 .geo-far { color: var(--danger); font-weight: 700; }
+.sup-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 10px 14px; margin-bottom: 16px; }
+.sup-tools-label { font-size: 12px; font-weight: 700; color: var(--ink-soft);
+  text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
