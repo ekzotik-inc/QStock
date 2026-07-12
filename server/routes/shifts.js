@@ -6,7 +6,7 @@ const { audit, currentStock, today, notify } = require('../util');
 const { canSeePoint, seConnected } = require('../access');
 const { recordMovement, checkLowStock, emitStockLine } = require('../stock');
 const { sendXlsx } = require('../xlsx');
-const { saveAttachment } = require('./attachments');
+const { saveAttachment, isImageDataUrl } = require('./attachments');
 const rt = require('../realtime');
 
 function numOrNull(v) {
@@ -126,6 +126,11 @@ router.post('/open', authRequired, (req, res) => {
 
   const existing = db.prepare(`SELECT * FROM shifts WHERE point_id = ? AND status = 'open'`).get(pid);
   if (existing) return res.status(409).json({ error: 'Смена уже открыта' });
+  // Фото точки при открытии обязательно для SE и на сервере — прямой API
+  // без фото не обходит правило (саппорт/админ открывают удалённо, без фото)
+  if (req.user.role === 'SE' && !isImageDataUrl(photo)) {
+    return res.status(400).json({ error: 'Фото точки с камеры обязательно при открытии смены' });
+  }
 
   const prev = db.prepare(
     `SELECT * FROM shifts WHERE point_id = ? AND status='closed' ORDER BY id DESC LIMIT 1`
@@ -407,6 +412,11 @@ router.post('/:id/close', authRequired, (req, res) => {
     return res.status(409).json({ error: 'Требуется инвентаризация. Закрытие смены невозможно.' });
   }
   const { lat, lng, photo } = req.body || {};
+  // Фото при закрытии обязательно для SE и на сервере (после проверки
+  // инвентаризации, чтобы причина отказа была честной)
+  if (req.user.role === 'SE' && !isImageDataUrl(photo)) {
+    return res.status(400).json({ error: 'Фото точки с камеры обязательно при закрытии смены' });
+  }
   const mismatch = shift.opened_by && shift.opened_by !== req.user.id ? 1 : 0;
   db.prepare(`UPDATE shifts SET status='closed', closed_by=?, closed_at=datetime('now'), closed_by_other=?,
       close_lat=?, close_lng=? WHERE id=?`)

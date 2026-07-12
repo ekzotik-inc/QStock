@@ -7,10 +7,14 @@ const { canSeePoint, seConnected } = require('../access');
 const router = express.Router();
 
 // Store a photo (client-compressed data-URL). Returns id or null when data invalid.
+// только растровые форматы: SVG как data-URL — вектор XSS
+function isImageDataUrl(data) {
+  return typeof data === 'string' && /^data:image\/(jpeg|jpg|png|webp);base64,/.test(data)
+    && data.length <= 4 * 1024 * 1024;
+}
+
 function saveAttachment({ kind, pointId = null, shiftId = null, visitId = null, userId = null, data }) {
-  // только растровые форматы: SVG как data-URL — вектор XSS
-  if (typeof data !== 'string' || !/^data:image\/(jpeg|jpg|png|webp);base64,/.test(data)) return null;
-  if (data.length > 4 * 1024 * 1024) return null; // ~3MB binary after base64
+  if (!isImageDataUrl(data)) return null;
   const info = db.prepare(
     `INSERT INTO attachments (kind, point_id, shift_id, visit_id, user_id, data)
      VALUES (?, ?, ?, ?, ?, ?)`
@@ -43,4 +47,4 @@ router.get('/', authRequired, (req, res) => {
   res.json(rows);
 });
 
-module.exports = { router, saveAttachment };
+module.exports = { router, saveAttachment, isImageDataUrl };

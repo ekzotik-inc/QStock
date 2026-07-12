@@ -992,12 +992,61 @@ function capturePhoto({ title = 'Фото', allowUpload = false } = {}) {
   });
 }
 
+// Геолокация недоступна/запрещена: инструкция для Chrome + «Повторить».
+// Возвращает гео, если пользователь включил и нажал «Повторить», иначе null.
+function geoHelpModal(actionLabel) {
+  return new Promise((resolve) => {
+    modal(`<h3>Геолокация недоступна</h3>
+      <div class="muted" style="margin-bottom:12px">Похоже, доступ к местоположению запрещён.
+        ${esc(actionLabel)} выполнится с пометкой <b>«без геолокации»</b> — саппорт это увидит.
+        Как включить геолокацию в Chrome:</div>
+      <div class="geo-help">
+        <div class="geo-help-block"><b>📱 Телефон (Android)</b>
+          <ol>
+            <li>Откройте шторку и включите <b>«Локация» (GPS)</b>.</li>
+            <li>В Chrome нажмите значок <b>⋮ → настройки страницы</b> (или замок 🔒 слева от адреса).</li>
+            <li>«Разрешения» → <b>«Геоданные» → «Разрешить»</b>.</li>
+            <li>Если пункта нет: Настройки телефона → Приложения → Chrome → Разрешения → <b>Местоположение → «Разрешить при использовании»</b>.</li>
+            <li>Вернитесь и нажмите «Повторить».</li>
+          </ol></div>
+        <div class="geo-help-block"><b>💻 Компьютер</b>
+          <ol>
+            <li>Нажмите значок <b>🔒 (замок)</b> слева от адреса сайта.</li>
+            <li>Включите переключатель <b>«Геоданные»</b> (или «Настройки сайтов» → Геоданные → «Разрешить»).</li>
+            <li>Если запрещено глобально: <b>chrome://settings/content/location</b> → «Сайты могут запрашивать данные о местоположении».</li>
+            <li>Обновлять страницу не нужно — нажмите «Повторить».</li>
+          </ol></div>
+      </div>
+      <div class="foot">
+        <button class="btn cancel" id="geoSkip">Продолжить без геолокации</button>
+        <button class="btn ok" id="geoRetry">Повторить</button>
+      </div>`,
+      (bg) => {
+        bg.querySelector('.modal-x').onclick = () => { bg.remove(); resolve(null); };
+        $('#geoSkip', bg).onclick = () => { bg.remove(); resolve(null); };
+        $('#geoRetry', bg).onclick = async () => {
+          const btn = $('#geoRetry', bg);
+          btn.disabled = true; btn.textContent = 'Определяем…';
+          const geo = await getGeo(8000);
+          if (geo) { bg.remove(); toast('Геолокация получена ✓', 'ok'); resolve(geo); }
+          else { btn.disabled = false; btn.textContent = 'Повторить'; toast('Всё ещё недоступна — проверьте шаги инструкции', 'warn'); }
+        };
+      }, 'wide');
+  });
+}
+
+// Гео с помощью: при отказе показывает инструкцию Chrome и даёт повторить.
+async function getGeoAssisted(actionLabel) {
+  let geo = await getGeo();
+  if (!geo) geo = await geoHelpModal(actionLabel);
+  return geo;
+}
+
 // Открытие смены с обязательным фото (камера) и геолокацией (не блокирует).
 async function openShiftWithChecks(pointId, extra) {
   const photo = await capturePhoto({ title: 'Фото точки при открытии смены' });
   if (!photo) { toast('Фото точки обязательно при открытии смены', 'warn'); return null; }
-  const geo = await getGeo();
-  if (!geo) toast('Геолокация недоступна — смена откроется с пометкой «без геолокации»', 'warn');
+  const geo = await getGeoAssisted('Открытие смены');
   return api('/shifts/open', { method: 'POST', body: { point_id: pointId, ...extra, photo, ...(geo || {}) } });
 }
 
@@ -2235,13 +2284,12 @@ function confirmClose(d) {
       closeModal();
       // фото с камеры обязательно только для SE на точке; саппорт/админ закрывают
       // удалённо (техпомощь) — их закрытие логируется как closed_by_other
-      let photo = null;
+      let photo = null, geo = null;
       if (App.user.role === 'SE') {
         photo = await capturePhoto({ title: 'Фото точки при закрытии смены' });
         if (!photo) return toast('Фото точки обязательно при закрытии смены', 'warn');
-      }
-      const geo = await getGeo();
-      if (!geo && App.user.role === 'SE') toast('Геолокация недоступна — закрытие с пометкой «без геолокации»', 'warn');
+        geo = await getGeoAssisted('Закрытие смены');
+      } else geo = await getGeo();
       try {
         const closed = await api(`/shifts/${d.shift.id}/close`, { method: 'POST', body: { ...(photo ? { photo } : {}), ...(geo || {}) } });
         toast('Смена закрыта', 'ok');

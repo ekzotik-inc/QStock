@@ -31,6 +31,7 @@ async function login(login, password) {
 }
 
 (async () => {
+  const PHOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==';
   console.log('== AUTH ==');
   const adminL = await login('admin', 'admin123');
   check('AUTH-01', adminL.status === 200 && adminL.data.token, `status ${adminL.status}`);
@@ -106,10 +107,11 @@ async function login(login, password) {
   // se is connected to pid. open manual shift
   const skuList = (await req('GET', '/api/skus', se)).data;
   const skuA = skuList[0].id, skuB = skuList[1].id;
-  const open = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, opening: [{ sku_id: skuA, qty: 100 }, { sku_id: skuB, qty: 50 }] });
+  check('SHF-01b', (await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false })).status === 400, 'SE cannot open without photo');
+  const open = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, photo: PHOTO, opening: [{ sku_id: skuA, qty: 100 }, { sku_id: skuB, qty: 50 }] });
   check('SHF-01', open.status === 200 && open.data.shift.status === 'open', 'open manual');
   const sid = open.data.shift.id;
-  check('SHF-03', (await req('POST', '/api/shifts/open', se, { point_id: pid })).status === 409, 'no double open');
+  check('SHF-03', (await req('POST', '/api/shifts/open', se, { point_id: pid, photo: PHOTO })).status === 409, 'no double open');
   check('SHF-04', (await req('POST', `/api/shifts/${sid}/opening`, bre, { sku_id: skuA, qty: 120 })).status === 200, 'set opening (support)');
   const sale = await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'sale', qty: 10 });
   check('SHF-05', sale.status === 200 && sale.data.current === 110, `sale current ${sale.data.current}`);
@@ -147,7 +149,8 @@ async function login(login, password) {
   check('INV-06', (await req('GET', '/api/inventory/schedules', admin)).data.length >= 1, 'list schedules');
 
   console.log('== SHIFT CLOSE / ADMIN ==');
-  const close = await req('POST', `/api/shifts/${sid}/close`, se);
+  check('SHF-10b', (await req('POST', `/api/shifts/${sid}/close`, se)).status === 400, 'SE cannot close without photo');
+  const close = await req('POST', `/api/shifts/${sid}/close`, se, { photo: PHOTO });
   check('SHF-10', close.status === 200 && close.data.shift.status === 'closed', 'close shift');
   check('SHF-11', (await req('POST', `/api/shifts/${sid}/op`, bre, { sku_id: skuA, type: 'sale', qty: 1 })).status === 400, 'closed read-only');
   check('SHF-17', !(await req('GET', '/api/points', admin)).data.find((p) => p.id === pid).se_connected.length, 'closing shift releases all connected SE');
@@ -156,7 +159,7 @@ async function login(login, password) {
   let cur = (await req('GET', '/api/points', admin)).data.find((p) => p.id === pid).shift_id;
   if (cur) await req('POST', `/api/shifts/${cur}/force-close`, admin);
   await req('POST', `/api/points/${pid}/connect`, se); // closing a shift releases SE; reconnect to reopen
-  const conflictOpen = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, opening: [] });
+  const conflictOpen = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, photo: PHOTO, opening: [] });
   // sid is closed; reopening it must fail because conflictOpen is open on same point
   const reopen = await req('POST', `/api/shifts/${sid}/reopen`, admin);
   check('SHF-15', reopen.status === 409, `reopen blocked when another open exists (${reopen.status})`);
@@ -206,18 +209,17 @@ async function login(login, password) {
 
   console.log('== BR (гео/фото/минимумы/пересменка/визиты) ==');
   {
-    const PHOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==';
     // ensure point free, se connected
     const p0 = (await req('GET', '/api/points', admin)).data.find((x) => x.id === pid);
     if (p0.shift_id) await req('POST', `/api/shifts/${p0.shift_id}/force-close`, admin);
     await req('POST', `/api/points/${pid}/connect`, se);
     // предыдущая смена закрыта админом (force-close) — значит для SE это пересменка:
     // нейтрализуем состояние циклом «открыл → инвентаризация → закрыл» от имени se
-    const o0 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: true });
+    const o0 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: true, photo: PHOTO });
     if (o0.data.shift.needs_inventory) {
       await req('POST', '/api/inventory/perform', se, { shift_id: o0.data.shift.id, items: [{ sku_id: skuA, new_qty: 50 }] });
     }
-    await req('POST', `/api/shifts/${o0.data.shift.id}/close`, se, {});
+    await req('POST', `/api/shifts/${o0.data.shift.id}/close`, se, { photo: PHOTO });
     await req('POST', `/api/points/${pid}/connect`, se);
     // geo + photo on open
     const o1 = await req('POST', '/api/shifts/open', se, {
@@ -246,14 +248,14 @@ async function login(login, password) {
     check('BR-22', attKind.status === 200 && attKind.data.length === 1 && attKind.data[0].kind === 'shift_close', 'attachments kind filter');
     // пересменка: same SE reopens -> no inventory required
     await req('POST', `/api/points/${pid}/connect`, se);
-    const o2 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: true });
+    const o2 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: true, photo: PHOTO });
     check('BR-07', o2.status === 200 && !o2.data.shift.needs_inventory, 'same SE: no handover inventory');
-    await req('POST', `/api/shifts/${o2.data.shift.id}/close`, se, {});
+    await req('POST', `/api/shifts/${o2.data.shift.id}/close`, se, { photo: PHOTO });
     // пересменка: another SE opens -> mandatory inventory
     await req('POST', `/api/points/${pid}/connect`, se2);
-    const o3 = await req('POST', '/api/shifts/open', se2, { point_id: pid, carryover: true });
+    const o3 = await req('POST', '/api/shifts/open', se2, { point_id: pid, carryover: true, photo: PHOTO });
     check('BR-08', o3.status === 200 && o3.data.shift.needs_inventory === 1, 'handover SE: inventory required');
-    const clBlocked = await req('POST', `/api/shifts/${o3.data.shift.id}/close`, se2, {});
+    const clBlocked = await req('POST', `/api/shifts/${o3.data.shift.id}/close`, se2, { photo: PHOTO });
     check('BR-09', clBlocked.status === 409, 'close blocked until handover inventory');
     await req('POST', `/api/shifts/${o3.data.shift.id}/force-close`, admin);
     // individual min stock per point
@@ -263,7 +265,7 @@ async function login(login, password) {
     check('BR-11', pmin.status === 200 && pmin.data.set === 1, 'support sets point min');
     check('BR-12', (await req('PUT', `/api/points/${pid}/min-stocks`, se, { items: [] })).status === 403, 'SE cannot set point min');
     await req('POST', `/api/points/${pid}/connect`, se);
-    const o4 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, opening: [{ sku_id: skuA, qty: 100 }] });
+    const o4 = await req('POST', '/api/shifts/open', se, { point_id: pid, carryover: false, photo: PHOTO, opening: [{ sku_id: skuA, qty: 100 }] });
     const findLow = (d) => {
       const pt = (d.points || []).find((x) => x.point_id === pid);
       return pt ? pt.rows.find((r) => r.sku_id === skuA) : null;
@@ -295,14 +297,13 @@ async function login(login, password) {
 
   console.log('== ANTIFRAUD ==');
   {
-    const PHOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==';
     // точка свободна, se подключается и открывает вручную с заниженным утром
     const pf = (await req('GET', '/api/points', admin)).data.find((x) => x.id === pid);
     if (pf.shift_id) await req('POST', `/api/shifts/${pf.shift_id}/force-close`, admin);
     await req('POST', '/api/notifications/read', bre, {});
     await req('POST', `/api/points/${pid}/connect`, se);
     const oF = await req('POST', '/api/shifts/open', se, {
-      point_id: pid, carryover: false, opening: [{ sku_id: skuA, qty: 1 }],
+      point_id: pid, carryover: false, photo: PHOTO, opening: [{ sku_id: skuA, qty: 1 }],
     });
     const sidF = oF.data.shift.id;
     // SE не может: править утро, поштучные операции, произвольные списания
@@ -348,7 +349,7 @@ async function login(login, password) {
     const p = (await req('GET', '/api/points', admin)).data.find((x) => x.id === pointId);
     if (p.shift_id) await req('POST', `/api/shifts/${p.shift_id}/force-close`, admin);
     await req('POST', `/api/points/${pointId}/connect`, seTok);
-    const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: true });
+    const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: true, photo: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==' });
     if (o.status !== 200) return false;
     const prevClosing = 77; // from inventory perform new opening, untouched
     const line = o.data.lines.find((l) => l.sku_id === skuId);
@@ -365,7 +366,7 @@ async function login(login, password) {
     const a = 'LOW-' + Date.now();
     const lowSku = (await req('POST', '/api/skus', adminTok, { name: 'LowSKU', article: a, price: 100, min_stock: 10 })).data;
     await req('POST', `/api/points/${pointId}/connect`, seTok);
-    const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: false, opening: [{ sku_id: lowSku.id, qty: 12 }] });
+    const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: false, photo: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==', opening: [{ sku_id: lowSku.id, qty: 12 }] });
     await req('POST', `/api/shifts/${o.data.shift.id}/set-sales`, seTok, { sku_id: lowSku.id, qty: 5 }); // 12-5=7 <=10
     await new Promise((r) => setTimeout(r, 200));
     const notifs = (await req('GET', '/api/notifications', breTok)).data;
@@ -387,7 +388,7 @@ async function login(login, password) {
     if (p.shift_id) await req('POST', `/api/shifts/${p.shift_id}/force-close`, adminTok);
     const skuId = (await req('GET', '/api/skus', seTok)).data[0].id;
     await req('POST', `/api/points/${pointId}/connect`, seTok);
-    const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: false, opening: [{ sku_id: skuId, qty: 50 }] });
+    const o = await req('POST', '/api/shifts/open', seTok, { point_id: pointId, carryover: false, photo: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==', opening: [{ sku_id: skuId, qty: 50 }] });
     const sid2 = o.data.shift.id;
     await new Promise((resolve) => {
       const seSock = io(BASE, { auth: { token: seTok }, reconnection: false, transports: ['websocket'] });

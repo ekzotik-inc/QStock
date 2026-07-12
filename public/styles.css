@@ -740,3 +740,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-soft); opacity: .55
   padding: 10px 14px; margin-bottom: 16px; }
 .sup-tools-label { font-size: 12px; font-weight: 700; color: var(--ink-soft);
   text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
+.geo-help { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.geo-help-block { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; font-size: 13px; }
+.geo-help-block ol { margin: 8px 0 0 18px; padding: 0; line-height: 1.7; color: var(--ink-soft); }
+@media (max-width: 700px) { .geo-help { grid-template-columns: 1fr; } }
