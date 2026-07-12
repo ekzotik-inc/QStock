@@ -2541,21 +2541,48 @@ async function pointForm(p) {
 async function viewShifts(v) {
   v.innerHTML = topbar('Смены');
   bindBell();
-  const body = el('<div class="card" style="padding:0;overflow:auto"></div>'); v.appendChild(body);
-  const rows = await api('/shifts');
+  const wrap = el('<div class="fade-in"></div>'); v.appendChild(wrap);
   const isAdmin = App.user.role === 'ADMIN';
-  body.innerHTML = `<table><thead><tr><th>#</th><th>Точка</th><th>Дата</th><th>Статус</th><th>Открыта</th><th>Закрыта</th><th></th></tr></thead>
-    <tbody>${rows.map((s) => `<tr><td>${s.id}</td><td>${esc(s.point_name)}</td><td>${s.business_date}</td>
-      <td>${statusPill(s.status)}${s.needs_inventory ? ' <span class="pill inv">инв.</span>' : ''}${s.closed_by_other ? ' <span class="pill danger" title="Закрыл не тот, кто открывал">⚠ др. сотрудник</span>' : ''}</td>
-      <td>${fmtDate(s.opened_at)}</td><td>${s.closed_at ? fmtDate(s.closed_at) : '—'}</td>
-      <td class="num"><button class="btn ghost sm" data-view="${s.id}">Открыть</button>
-      ${s.status === 'closed' ? `<button class="btn ghost sm" data-xls="${s.id}" title="Выгрузить в Excel">Excel</button>` : ''}
-      ${isAdmin && s.status === 'closed' ? `<button class="btn ghost sm" data-reopen="${s.id}">Разблок.</button>` : ''}
-      ${isAdmin && s.status === 'open' ? `<button class="btn ghost sm" data-force="${s.id}">Закрыть</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
-  body.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => openShift(Number(b.dataset.view)));
-  body.querySelectorAll('[data-xls]').forEach((b) => b.onclick = () => window.open(`/api/shifts/${b.dataset.xls}/export.xlsx`, '_blank'));
-  body.querySelectorAll('[data-reopen]').forEach((b) => b.onclick = async () => { try { await api(`/shifts/${b.dataset.reopen}/reopen`, { method: 'POST' }); toast('Смена разблокирована', 'ok'); viewShifts(v); } catch {} });
-  body.querySelectorAll('[data-force]').forEach((b) => b.onclick = async () => { try { await api(`/shifts/${b.dataset.force}/force-close`, { method: 'POST' }); toast('Смена закрыта', 'ok'); viewShifts(v); } catch {} });
+  const points = await api('/points').catch(() => []);
+  const load = async () => {
+    const q = new URLSearchParams();
+    if (App.state.shPoint) q.set('point_id', App.state.shPoint);
+    if (App.state.shStatus) q.set('status', App.state.shStatus);
+    if (App.state.shDate) q.set('date', App.state.shDate);
+    const rows = await api('/shifts?' + q.toString());
+    wrap.innerHTML = `
+      <div class="filters" style="margin-bottom:14px">
+        <div class="field"><label>Точка</label><select id="shPoint">
+          <option value="">Все точки</option>
+          ${points.map((p) => `<option value="${p.id}" ${String(p.id) === String(App.state.shPoint || '') ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Статус</label><select id="shStatus">
+          <option value="">Все</option>
+          <option value="open" ${App.state.shStatus === 'open' ? 'selected' : ''}>Открытые</option>
+          <option value="closed" ${App.state.shStatus === 'closed' ? 'selected' : ''}>Закрытые</option>
+        </select></div>
+        <div class="field"><label>Дата</label><input id="shDate" type="date" value="${App.state.shDate || ''}"></div>
+      </div>
+      <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th>#</th><th>Точка</th><th>Дата</th><th>Статус</th><th>Открыл</th><th>Закрыл</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map((s) => `<tr><td class="muted">${s.id}</td><td><b>${esc(s.point_name)}</b></td><td>${s.business_date}</td>
+        <td>${statusPill(s.status)}${s.needs_inventory ? ' <span class="pill inv">инв.</span>' : ''}${s.closed_by_other ? ' <span class="pill danger" title="Закрыл не тот, кто открывал">⚠ др. сотрудник</span>' : ''}</td>
+        <td>${emp(s.opened_by_name)}<div class="muted" style="font-size:12px">${fmtDate(s.opened_at)}</div></td>
+        <td>${s.closed_at ? `${emp(s.closed_by_name)}<div class="muted" style="font-size:12px">${fmtDate(s.closed_at)}</div>` : '<span class="muted">—</span>'}</td>
+        <td class="num" style="white-space:nowrap"><button class="btn ghost sm" data-view="${s.id}">Открыть</button>${
+          s.status === 'closed' ? `<button class="btn ghost sm" data-xls="${s.id}" title="Выгрузить в Excel">Excel</button>` : ''}${
+          isAdmin && s.status === 'closed' ? `<button class="btn ghost sm" data-reopen="${s.id}">Разблок.</button>` : ''}${
+          isAdmin && s.status === 'open' ? `<button class="btn ghost sm" data-force="${s.id}">Закрыть</button>` : ''}</td></tr>`).join('')
+        : '<tr><td colspan="7" class="empty">Смен по выбранным фильтрам нет.</td></tr>'}</tbody></table></div>`;
+    $('#shPoint', wrap).onchange = (e) => { App.state.shPoint = e.target.value; load(); };
+    $('#shStatus', wrap).onchange = (e) => { App.state.shStatus = e.target.value; load(); };
+    $('#shDate', wrap).onchange = (e) => { App.state.shDate = e.target.value; load(); };
+    wrap.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => openShift(Number(b.dataset.view)));
+    wrap.querySelectorAll('[data-xls]').forEach((b) => b.onclick = () => window.open(`/api/shifts/${b.dataset.xls}/export.xlsx`, '_blank'));
+    wrap.querySelectorAll('[data-reopen]').forEach((b) => b.onclick = async () => { try { await api(`/shifts/${b.dataset.reopen}/reopen`, { method: 'POST' }); toast('Смена разблокирована', 'ok'); load(); } catch {} });
+    wrap.querySelectorAll('[data-force]').forEach((b) => b.onclick = async () => { try { await api(`/shifts/${b.dataset.force}/force-close`, { method: 'POST' }); toast('Смена закрыта', 'ok'); load(); } catch {} });
+  };
+  App._refresh = load; await load();
 }
 
 // ============================================================
@@ -2601,18 +2628,26 @@ async function viewSkus(v) {
      <button class="btn secondary sm" id="imp">Импорт из файла</button>
      <button class="btn sm" id="add">+ SKU</button>`);
   bindBell();
+  const search = el('<div class="row" style="margin-bottom:12px"><input class="tbl-search" id="skuSearch" placeholder="Поиск: название, артикул, категория…"></div>');
+  v.appendChild(search);
   const body = el('<div class="card" style="padding:0;overflow:auto"></div>'); v.appendChild(body);
   $('#add').onclick = () => skuForm();
   $('#tmpl').onclick = () => downloadSkuTemplate();
   $('#imp').onclick = () => importSkuFile(() => load());
   $('#cats').onclick = () => categoriesModal();
+  $('#skuSearch', v).addEventListener('input', () => {
+    const t = $('#skuSearch', v).value.trim().toLowerCase();
+    body.querySelectorAll('tbody tr[data-text]').forEach((tr) => {
+      tr.style.display = !t || tr.dataset.text.includes(t) ? '' : 'none';
+    });
+  });
   const load = async () => {
     const rows = await api('/skus?all=1');
     body.innerHTML = `<table><thead><tr><th>Название</th><th>Артикул</th><th>Категория</th><th class="num">Цена</th><th class="num">Мин. остаток</th><th>Статус</th><th></th></tr></thead>
-      <tbody>${rows.map((s) => `<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.article)}</td><td>${esc(s.category || '—')}</td>
+      <tbody>${rows.map((s) => `<tr data-text="${esc(`${s.name} ${s.article} ${s.category || ''}`.toLowerCase())}"><td><b>${esc(s.name)}</b></td><td>${esc(s.article)}</td><td>${esc(s.category || '—')}</td>
         <td class="num">${money(s.price)}</td><td class="num">${num(s.min_stock)}</td>
         <td>${s.active ? '<span class="pill open">активен</span>' : '<span class="pill closed">выкл</span>'}</td>
-        <td class="num"><button class="btn ghost sm" data-edit="${s.id}">Изм.</button><button class="btn ghost sm" data-hist="${s.id}">Цены</button>
+        <td class="num" style="white-space:nowrap"><button class="btn ghost sm" data-edit="${s.id}">Изм.</button><button class="btn ghost sm" data-hist="${s.id}">Цены</button>
         <button class="btn ghost sm" data-toggle="${s.id}">${s.active ? 'Выкл' : 'Вкл'}</button></td></tr>`).join('')}</tbody></table>`;
     body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => skuForm(rows.find((s) => s.id === Number(b.dataset.edit))));
     body.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => { await api(`/skus/${b.dataset.toggle}/toggle`, { method: 'POST' }); load(); });
@@ -2749,8 +2784,16 @@ async function viewUsers(v) {
   v.innerHTML = topbar('Пользователи', `<button class="btn sm" id="add">+ Пользователь</button>`,
     'Профили всех сотрудников · логины, пароли и роли назначает администратор');
   bindBell();
+  const usearch = el('<div class="row" style="margin-bottom:12px"><input class="tbl-search" id="userSearch" placeholder="Поиск: имя, логин, телефон…"></div>');
+  v.appendChild(usearch);
   const body = el('<div class="fade-in"></div>'); v.appendChild(body);
   $('#add').onclick = () => userForm();
+  $('#userSearch', v).addEventListener('input', () => {
+    const t = $('#userSearch', v).value.trim().toLowerCase();
+    body.querySelectorAll('.profile-card[data-text]').forEach((c) => {
+      c.style.display = !t || c.dataset.text.includes(t) ? '' : 'none';
+    });
+  });
   const rolePill = (r) => ({
     ADMIN: '<span class="pill closed" style="background:var(--ink);color:var(--surface)">Администратор</span>',
     BRE: '<span class="pill inv">Support Exec</span>',
@@ -2764,7 +2807,7 @@ async function viewUsers(v) {
       if (!us.length) return '';
       return `<div class="section-title">${title} · ${us.length}</div>
         <div class="profile-grid">${us.map((u) => `
-          <div class="card profile-card ${u.status === 'blocked' ? 'is-blocked' : ''}">
+          <div class="card profile-card ${u.status === 'blocked' ? 'is-blocked' : ''}" data-text="${esc(`${u.full_name} ${u.login} ${u.phone || ''}`.toLowerCase())}">
             <div class="row" style="gap:13px">
               <div class="avatar pf-avatar" style="${u.avatar_color ? `background:${esc(u.avatar_color)}` : ''}">${u.avatar ? `<img src="${u.avatar}" alt="">` : esc(initials(u.full_name))}</div>
               <div style="flex:1;min-width:0">
@@ -2841,14 +2884,44 @@ async function viewSchedules(v) {
 // ============================================================
 // AUDIT (ADMIN)
 // ============================================================
+const AUDIT_RU = {
+  login: 'Вход в систему', login_ratelimited: '⚠ Блокировка входа (перебор пароля)',
+  user_create: 'Создан пользователь', user_update: 'Изменён пользователь',
+  sku_create: 'Создан SKU', sku_update: 'Изменён SKU', sku_toggle: 'SKU вкл/выкл', sku_import: 'Импорт SKU',
+  point_create: 'Создана точка', point_update: 'Изменена точка',
+  point_connect: 'SE подключился к точке', point_disconnect: 'SE отключился от точки',
+  point_min_update: 'Изменены минимумы точки',
+  shift_open: 'Открыта смена', shift_close: 'Закрыта смена',
+  shift_close_anomaly: '⚠ Смену закрыл не открывавший', shift_force_close: 'Смена закрыта принудительно',
+  shift_reopen: 'Смена разблокирована', opening_set: 'Правка утреннего остатка',
+  opening_mismatch: '⚠ Утро не совпало с прошлым закрытием',
+  op_sale: 'Продажа', op_income: 'Приход', op_writeoff: 'Списание', op_adjustment: 'Корректировка',
+  income_batch: 'Поступление товара', inventory_assign: 'Назначена инвентаризация',
+  inventory_perform: 'Проведена инвентаризация', schedule_create: 'Создан график инвентаризаций',
+  visit_report: 'Отчёт о визите', note_create: 'Создана заметка', note_update: 'Изменена заметка',
+  note_delete: 'Удалена заметка', profile_update: 'Изменён профиль',
+};
 async function viewAudit(v) {
   v.innerHTML = topbar('Журнал действий');
   bindBell();
+  const search = el('<div class="row" style="margin-bottom:12px"><input class="tbl-search" id="audSearch" placeholder="Поиск: сотрудник, действие…"></div>');
+  v.appendChild(search);
   const body = el('<div class="card" style="padding:0;overflow:auto"></div>'); v.appendChild(body);
   const rows = await api('/audit');
-  body.innerHTML = `<table><thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Старое</th><th>Новое</th></tr></thead>
-    <tbody>${rows.map((a) => `<tr><td>${fmtDate(a.created_at)}</td><td>${emp(a.user_name)}</td><td>${esc(a.action)}</td><td>${esc(a.entity || '')}</td>
-      <td><span class="muted">${esc((a.old_value || '').slice(0, 60))}</span></td><td><span class="muted">${esc((a.new_value || '').slice(0, 60))}</span></td></tr>`).join('')}</tbody></table>`;
+  body.innerHTML = `<table><thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead>
+    <tbody>${rows.map((a) => {
+      const label = AUDIT_RU[a.action] || a.action;
+      return `<tr data-text="${esc(`${a.user_name || ''} ${label} ${a.action}`.toLowerCase())}">
+        <td style="white-space:nowrap">${fmtDate(a.created_at)}</td><td>${emp(a.user_name)}</td>
+        <td>${label.startsWith('⚠') ? `<b class="evening-low">${esc(label)}</b>` : esc(label)}</td>
+        <td><span class="muted" title="${esc(a.new_value || '')}">${esc((a.new_value || '').slice(0, 80))}</span></td></tr>`;
+    }).join('')}</tbody></table>`;
+  $('#audSearch', v).addEventListener('input', () => {
+    const t = $('#audSearch', v).value.trim().toLowerCase();
+    body.querySelectorAll('tbody tr[data-text]').forEach((tr) => {
+      tr.style.display = !t || tr.dataset.text.includes(t) ? '' : 'none';
+    });
+  });
 }
 
 window.closeModal = closeModal;
