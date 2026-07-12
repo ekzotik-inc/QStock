@@ -81,9 +81,6 @@ router.get('/dashboard', authRequired, (req, res) => {
      WHERE sh.point_id IN (${ph}) AND sh.status='open' GROUP BY sk.id ORDER BY q DESC LIMIT 15`
   ).all(...ids);
 
-  const pointRanking = [...table].sort((a, b) => b.sales_value - a.sales_value)
-    .map((r) => ({ name: r.name, value: r.sales_value }));
-
   res.json({
     widgets: {
       open_shifts: shiftStats.open_count || 0,
@@ -97,7 +94,7 @@ router.get('/dashboard', authRequired, (req, res) => {
     low_stock: lowStock,
     unclosed_shifts: unclosed,
     table,
-    charts: { sales_by_day: salesByDay, sales_by_sku: salesBySku, stock_by_sku: stockBySku, point_ranking: pointRanking },
+    charts: { sales_by_day: salesByDay, sales_by_sku: salesBySku, stock_by_sku: stockBySku },
   });
 });
 
@@ -209,50 +206,9 @@ function emptyDashboard() {
     widgets: { open_shifts: 0, closed_shifts: 0, active_se: 0, sales_qty: 0, sales_value: 0, stock_value: 0 },
     deltas: { sales_qty: 0, sales_value: 0 },
     low_stock: [], unclosed_shifts: [], table: [],
-    charts: { sales_by_day: [], sales_by_sku: [], stock_by_sku: [], point_ranking: [] },
+    charts: { sales_by_day: [], sales_by_sku: [], stock_by_sku: [] },
   };
 }
-
-// KPI endpoints
-router.get('/kpi/se/:id', authRequired, (req, res) => {
-  const seId = Number(req.params.id);
-  const { date_from, date_to } = req.query;
-  const from = date_from || '2000-01-01', to = date_to || '2999-01-01';
-  const shifts = db.prepare(
-    `SELECT SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) o, SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END) c,
-            COUNT(*) total FROM shifts WHERE opened_by=? AND business_date BETWEEN ? AND ?`
-  ).get(seId, from, to);
-  const sales = db.prepare(
-    `SELECT COALESCE(SUM(qty),0) q, COALESCE(SUM(qty*price),0) v FROM sales WHERE user_id=? AND date(created_at) BETWEEN ? AND ?`
-  ).get(seId, from, to);
-  const inv = db.prepare(`SELECT COUNT(*) c FROM inventories WHERE user_id=? AND date(created_at) BETWEEN ? AND ?`).get(seId, from, to).c;
-  const adj = db.prepare(`SELECT COUNT(*) c FROM movements WHERE user_id=? AND type='adjustment' AND date(created_at) BETWEEN ? AND ?`).get(seId, from, to).c;
-  res.json({
-    open_shifts: shifts.o || 0, closed_shifts: shifts.c || 0,
-    sales_qty: sales.q, sales_value: sales.v,
-    avg_sales_per_shift: shifts.total ? sales.q / shifts.total : 0,
-    inventories: inv, adjustments: adj,
-  });
-});
-
-router.get('/kpi/bre/:id', authRequired, (req, res) => {
-  const breId = Number(req.params.id);
-  const ids = db.prepare('SELECT id FROM points WHERE bre_id=?').all(breId).map((r) => r.id);
-  if (!ids.length) return res.json({ points: 0, sales_value: 0, stock_value: 0, active_se: 0, unclosed: 0, low_stock: 0, ranking: [] });
-  const ph = scopePlaceholders(ids);
-  const sales = db.prepare(`SELECT COALESCE(SUM(sa.qty*sa.price),0) v FROM sales sa JOIN shifts sh ON sh.id=sa.shift_id WHERE sh.point_id IN (${ph})`).get(...ids).v;
-  const activeSE = db.prepare(`SELECT COUNT(DISTINCT se_id) c FROM point_se WHERE point_id IN (${ph})`).get(...ids).c;
-  let stockValue = 0;
-  for (const s of db.prepare(`SELECT id FROM shifts WHERE point_id IN (${ph}) AND status='open'`).all(...ids)) {
-    for (const r of db.prepare('SELECT ss.*, sk.price FROM shift_stock ss JOIN skus sk ON sk.id=ss.sku_id WHERE ss.shift_id=?').all(s.id))
-      stockValue += currentStock(r) * r.price;
-  }
-  res.json({
-    points: ids.length, sales_value: sales, stock_value: stockValue, active_se: activeSE,
-    unclosed: computeUnclosed(ids).length, low_stock: computeLowStock(ids).length,
-    ranking: ids.map((pid) => pointRow(pid, '2000-01-01', '2999-01-01')).sort((a, b) => b.sales_value - a.sales_value),
-  });
-});
 
 // Excel export (.xlsx)
 router.get('/export.xlsx', authRequired, (req, res) => {

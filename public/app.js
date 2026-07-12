@@ -221,7 +221,6 @@ function navGroups() {
     { h: 'Обзор', items: [
       ['dashboard', 'Дашборд', 'layout-dashboard'],
       ['analytics', 'Аналитика', 'bar-chart-3'],
-      ['kpi', 'KPI', 'gauge'],
     ]},
     { h: 'Операции', items: [
       ['points', 'Торговые точки', 'map-pin'],
@@ -460,7 +459,7 @@ function renderRoute() {
     // Support Exec (BRE) lands on the cross-point low-stock dashboard
     dashboard: App.user.role === 'BRE' ? viewSupportDash : viewDashboard,
     monitor: viewDashboard, points: viewPoints,
-    shift: viewShift, shifts: viewShifts, analytics: viewAnalytics, kpi: viewKpi,
+    shift: viewShift, shifts: viewShifts, analytics: viewAnalytics,
     skus: viewSkus, users: viewUsers, schedules: viewSchedules, audit: viewAudit,
     // SE cabinet
     myshift: viewMyShift, arrival: viewArrival, sestock: viewSeStock,
@@ -502,15 +501,6 @@ async function viewDashboard(v) {
       api('/analytics/dashboard?chart_period=' + per),
       api('/movements?limit=6').catch(() => []),
     ]);
-    // «Топ точек» — прогресс-бары по рейтингу (как в макете)
-    const rank = d.charts.point_ranking;
-    const rankMax = Math.max(1, ...rank.map((x) => Number(x.value) || 0));
-    const topPoints = rank.slice(0, 5).map((x) => `<div>
-        <div class="row between" style="font-size:13px;margin-bottom:6px">
-          <span style="color:var(--ink-2);font-weight:600">${esc(x.name)}</span>
-          <span style="font-weight:800;font-variant-numeric:tabular-nums">${money(x.value)}</span></div>
-        <div class="track" style="height:8px"><div class="fill" style="width:${Math.max(4, Math.round((Number(x.value) || 0) / rankMax * 100))}%"></div></div>
-      </div>`).join('');
     // «Последние события» — движения SKU с иконками
     const actMeta = {
       sale: ['shopping-bag', 'teal', (m) => `Продажа ×${num(Math.abs(m.qty))} — ${m.sku_name}`],
@@ -555,8 +545,7 @@ async function viewDashboard(v) {
             <button data-per="year" class="seg-opt ${per === 'year' ? 'on' : ''}">Год</button>
           </div></div>
           ${chartCanvas(d.charts.sales_by_day.map((x) => [x.d, x.v]), 'line')}</div>
-        <div class="card"><h3 style="font-size:16px">Топ точек</h3>
-          <div style="display:flex;flex-direction:column;gap:14px;margin-top:12px">${topPoints || '<div class="empty">Нет данных</div>'}</div></div>
+        ${chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
       </div>
       <div class="dash-duo">
         <div class="card"><h3 style="font-size:16px;margin-bottom:6px">Последние события</h3>
@@ -565,12 +554,11 @@ async function viewDashboard(v) {
           <h3>Плановая инвентаризация</h3>
           <p>Назначьте регулярную проверку остатков — ежедневно, еженедельно или ежемесячно.</p>
           <button class="btn" id="goSched">Настроить</button></div>`
-        : chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
+        : chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
       </div>
       ${App.user.role === 'ADMIN' ? `<div class="cards">
-        ${chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
         ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
-      </div>` : chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
+      </div>` : ''}
       <div class="section-title">Торговые точки</div>
       <div class="card" style="padding:0;overflow:auto">
         <table><thead><tr><th>Точка</th><th>Саппорт</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th><th>Обновлено</th></tr></thead>
@@ -2478,8 +2466,7 @@ async function viewAnalytics(v) {
     body.innerHTML = `<div class="cards">
       ${chartCard('Продажи по дням', d.charts.sales_by_day.map((x) => [x.d, x.v]), 'line')}
       ${chartCard('Продажи по SKU', d.charts.sales_by_sku.map((x) => [x.name, x.v]))}
-      ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}
-      ${chartCard('Рейтинг точек', d.charts.point_ranking.map((x) => [x.name, x.value]))}</div>
+      ${chartCard('Остатки по SKU', d.charts.stock_by_sku.map((x) => [x.name, x.q]))}</div>
       <div class="section-title">По точкам</div>
       <div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>Точка</th><th>Саппорт</th><th>СПВ</th><th>SE</th><th>Смена</th><th class="num">Продажи</th><th class="num">Сумма</th><th class="num">Остаток, сум</th></tr></thead>
       <tbody>${d.table.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.bre_name ? emp(r.bre_name) : '—'}</td><td>${r.spv_name ? emp(r.spv_name) : '—'}</td><td>${r.se.length ? r.se.map(emp).join(', ') : '—'}</td><td>${statusPill(r.shift_status)}</td>
@@ -2490,38 +2477,6 @@ async function viewAnalytics(v) {
   wireEnterNav(v, '.filters input', load);
   $('#exp').onclick = () => { const q = new URLSearchParams(); if ($('#df').value) q.set('date_from', $('#df').value); if ($('#dt').value) q.set('date_to', $('#dt').value); window.open('/api/analytics/export.xlsx?' + q.toString(), '_blank'); };
   await load();
-}
-
-// ============================================================
-// KPI
-// ============================================================
-async function viewKpi(v) {
-  v.innerHTML = topbar('KPI');
-  bindBell();
-  const body = el('<div></div>'); v.appendChild(body);
-  if (App.user.role === 'BRE') {
-    const k = await api('/analytics/kpi/bre/' + App.user.id);
-    body.innerHTML = `<div class="kpis">
-      ${kpi('Точек', k.points)} ${kpi('Сумма продаж', money(k.sales_value), true)} ${kpi('Остаток, сум', money(k.stock_value), true)}
-      ${kpi('Активных SE', k.active_se)} ${kpi('Незакрытых смен', k.unclosed)} ${kpi('Низкий остаток', k.low_stock)}</div>
-      <div class="section-title">Рейтинг точек</div>${chartCard('Продажи', k.ranking.map((r) => [r.name, r.sales_value]))}`;
-    mountCharts();
-    return;
-  }
-  // ADMIN: pick SE or BRE
-  const users = await api('/users');
-  const ses = users.filter((u) => u.role === 'SE'); const bres = users.filter((u) => u.role === 'BRE');
-  body.innerHTML = `<div class="filters">
-    <div class="field"><label>Sales Expert</label><select id="seSel"><option value="">—</option>${ses.map((u) => `<option value="${u.id}">${esc(u.full_name)}</option>`).join('')}</select></div>
-    <div class="field"><label>Support Exec</label><select id="breSel"><option value="">—</option>${bres.map((u) => `<option value="${u.id}">${esc(u.full_name)}</option>`).join('')}</select></div>
-    </div><div id="kpiOut"></div>`;
-  $('#seSel').onchange = async (e) => { if (!e.target.value) return; const k = await api('/analytics/kpi/se/' + e.target.value);
-    $('#kpiOut').innerHTML = `<div class="kpis">${kpi('Открытых смен', k.open_shifts)}${kpi('Закрытых смен', k.closed_shifts)}
-      ${kpi('Продажи (шт)', num(k.sales_qty))}${kpi('Сумма продаж', money(k.sales_value), true)}
-      ${kpi('Среднее/смена', num(k.avg_sales_per_shift))}${kpi('Инвентаризаций', k.inventories)}${kpi('Корректировок', k.adjustments)}</div>`; };
-  $('#breSel').onchange = async (e) => { if (!e.target.value) return; const k = await api('/analytics/kpi/bre/' + e.target.value);
-    $('#kpiOut').innerHTML = `<div class="kpis">${kpi('Точек', k.points)}${kpi('Сумма продаж', money(k.sales_value), true)}
-      ${kpi('Остаток, сум', money(k.stock_value), true)}${kpi('Активных SE', k.active_se)}${kpi('Незакрытых смен', k.unclosed)}${kpi('Низкий остаток', k.low_stock)}</div>`; };
 }
 
 // ============================================================

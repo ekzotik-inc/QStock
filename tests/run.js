@@ -174,8 +174,13 @@ async function login(login, password) {
   check('ANL-03', Array.isArray(dash.data.unclosed_shifts), 'unclosed block');
   check('ANL-04', Array.isArray(dash.data.table), 'point table');
   check('ANL-05', dash.data.charts && dash.data.charts.sales_by_day, 'charts');
-  check('ANL-06', (await req('GET', `/api/analytics/kpi/se/${seL.data.user.id}`, admin)).status === 200, 'SE KPI');
-  check('ANL-07', (await req('GET', `/api/analytics/kpi/bre/${breL.data.user.id}`, admin)).status === 200, 'BRE KPI');
+  // KPI/рейтинги удалены из проекта: эндпоинты не отвечают JSON-данными
+  const kpiSe = await req('GET', `/api/analytics/kpi/se/${seL.data.user.id}`, admin);
+  const kpiBre = await req('GET', `/api/analytics/kpi/bre/${breL.data.user.id}`, admin);
+  check('ANL-06', kpiSe.status === 404 || kpiSe.data == null, 'KPI SE endpoint removed');
+  check('ANL-07', kpiBre.status === 404 || kpiBre.data == null, 'KPI BRE endpoint removed');
+  const dashCharts = (await req('GET', '/api/analytics/dashboard', admin)).data.charts;
+  check('ANL-10', !('point_ranking' in dashCharts), 'point ranking removed from dashboard');
   const xls = await fetch(BASE + '/api/analytics/export.xlsx', { headers: { Authorization: 'Bearer ' + admin } });
   const sig = Buffer.from(await xls.arrayBuffer()).slice(0, 2).toString('latin1');
   check('ANL-08', xls.status === 200 && sig === 'PK', `Excel export (sig ${sig})`);
